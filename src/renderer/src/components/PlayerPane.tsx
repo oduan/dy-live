@@ -580,6 +580,7 @@ export function PlayerPane(p: PlayerPaneProps) {
               }}
             />
           </div>
+          <div className="ctl-spacer" />
           <button
             className={cx('ctl', chatActive && 'ctl-on')}
             onClick={toggleChat}
@@ -587,7 +588,6 @@ export function PlayerPane(p: PlayerPaneProps) {
           >
             <IconChat />
           </button>
-          <div className="ctl-spacer" />
           <div className="timer-anchor">
             <button
               className={cx('ctl', sleepAt > 0 && 'ctl-timer-on')}
@@ -674,9 +674,7 @@ export function PlayerPane(p: PlayerPaneProps) {
                   </div>
                 ) : (
                   <div className="chat-item" key={i}>
-                    <span className="chat-nick" style={{ color: `hsl(${m.color} 70% 68%)` }}>
-                      {m.nick}
-                    </span>
+                    <span className="chat-nick">{m.nick}</span>
                     <span className="chat-text">：{m.content}</span>
                   </div>
                 )
