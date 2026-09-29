@@ -160,7 +160,15 @@ export class ChatService {
       let url = ''
       if (this.webRid) {
         url = await this.deps.sessions.captureRoomWSUrl(this.webRid, this.roomId)
-        if (url) log('chat', '已获取页面侧弹幕连接参数')
+        if (url) {
+          log('chat', '已获取页面侧弹幕连接参数')
+          // roomId 允许缺省（如热门房间仅知道 webRid）：从捕获 URL 里取真实 room_id
+          const m = /([?&])room_id=(\d+)/.exec(url)
+          if (!this.roomId && m) {
+            this.roomId = m[2]
+            log('chat', '从捕获 URL 解析 room_id:', this.roomId)
+          }
+        }
       }
       if (!url) {
         log('chat', '未捕获到页面连接参数，尝试自建 URL')
@@ -234,6 +242,29 @@ export class ChatService {
     }, delay)
   }
 
+  /**
+   * 表情聊天。EmojiChatMessage{ common=1, emoji_id=2, user=3, emoji_content=4 }（字段号待实测校准）。
+   * 内容缺省时以 emoji_id 占位展示。
+   */
+  private onEmojiChat(buf: Buffer): void {
+    const em = decodeFields(buf)
+    const user = em.get(3)?.[0]
+    if (!user) return
+    const u = decodeFields(user.bytes)
+    const nick = fstr(u.get(3)?.[0])
+    if (!nick) return
+    let content = fstr(em.get(4)?.[0])
+    if (!content) {
+      const eid = fstr(em.get(2)?.[0])
+      if (!eid) return
+      content = `[表情:${eid.slice(0, 12)}]`
+    }
+    const msgId = this.msgIdOf(em)
+    if (this.isDup(msgId || `e|${nick}|${content}`)) return
+    this.buffer.push({ kind: 'chat', nick, color: colorFor(nick), content })
+    this.scheduleFlush()
+  }
+
   // ---------- 帧处理 ----------
 
   private heartbeat(): Buffer {
@@ -271,6 +302,8 @@ export class ChatService {
       if (!mp) continue
       if (method === 'WebcastChatMessage') this.onChat(mp)
       else if (method === 'WebcastGiftMessage') this.onGift(mp)
+      // 表情聊天：电台房的小心心等互动走此通道，显示为普通弹幕
+      else if (method === 'WebcastEmojiChatMessage') this.onEmojiChat(mp)
     }
   }
 
@@ -317,23 +350,54 @@ export class ChatService {
    * 礼物名在 GiftStruct 内，字段号未完全确认：取第一个短中文字符串字段兜底。
    */
   private onGift(buf: Buffer): void {
+    // TEMP-DBG: 地毯式字段勘察
     const gm = decodeFields(buf)
+    log(
+      'chat',
+      `收到 GiftMessage (${buf.length}B) 字段: ${[...gm.keys()]
+        .map((k) => {
+          const f = gm.get(k)![0]
+          return `${k}:${f.wire === 2 ? f.bytes.length : 'v' + String(f.int).slice(0, 10)}`
+        })
+        .join(' ')}`
+    )
     const user = gm.get(7)?.[0]
-    if (!user) return
-    const u = decodeFields(user.bytes)
-    const nick = fstr(u.get(3)?.[0])
-    if (!nick) return
-    const count = fint(gm.get(5)?.[0]) || 1
-    let name = ''
+    if (user) {
+      const u = decodeFields(user.bytes)
+      log('chat', `user(7): nick='${fstr(u.get(3)?.[0])}' 字段号:[${[...u.keys()].join(',')}]`)
+    } else {
+      log('chat', 'GiftMessage 无字段7(user)')
+    }
     const gift = gm.get(16)?.[0]
     if (gift) {
       const gf = decodeFields(gift.bytes)
+      log('chat', `gift(16): 字段号:[${[...gf.keys()].join(',')}]`)
       for (const [no, list] of gf) {
+        const f = list[0]
+        if (f && f.wire === 2) {
+          const s = f.bytes.toString('utf8')
+          if (/^[\x20-\x7e\u4e00-\u9fa5A-Za-z0-9]+$/.test(s) && s.length <= 30) log('chat', `  gift.${no} = '${s}'`)
+        }
+      }
+    } else {
+      log('chat', 'GiftMessage 无字段16(gift)')
+    }
+    log('chat', `repeat_count(字段5) = ${fint(gm.get(5)?.[0])}`)
+    const user2 = gm.get(7)?.[0]
+    if (!user2) return
+    const u2 = decodeFields(user2.bytes)
+    const nick = fstr(u2.get(3)?.[0])
+    if (!nick) return
+    const count = fint(gm.get(5)?.[0]) || 1
+    let name = ''
+    const gift2 = gm.get(16)?.[0]
+    if (gift2) {
+      const gf2 = decodeFields(gift2.bytes)
+      for (const [no, list] of gf2) {
         const f = list[0]
         if (!f || f.wire !== 2) continue
         const s = f.bytes.toString('utf8')
         // 调试留痕：确认礼物名字段号后收紧此启发式
-        log('chat', `[gift字段] ${no} = ${s.slice(0, 24)}`)
         if (!name && /^[\u4e00-\u9fa5A-Za-z0-9]{1,12}$/.test(s)) name = s
       }
     }
