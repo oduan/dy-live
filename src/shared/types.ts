@@ -93,8 +93,6 @@ export interface Settings {
   refreshIntervalSec: number
   volume: number
   muted: boolean
-  /** 直播间公屏弹幕聊天面板开关 */
-  chatVisible: boolean
 }
 
 export interface AuthState {
@@ -122,8 +120,10 @@ export interface UpdateStateEvent {
 
 /** 公屏弹幕消息（主进程 → 渲染进程，批量推送） */
 export interface ChatItem {
+  /** 消息类型：chat 普通弹幕 / sys 系统提示 / gift 礼物 */
+  kind: 'chat' | 'sys' | 'gift'
   nick: string
-  /** 昵称展示色（HSL hue） */
+  /** 昵称展示色（HSL hue），sys 消息忽略 */
   color: number
   content: string
 }

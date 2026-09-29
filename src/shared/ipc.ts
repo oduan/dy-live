@@ -19,6 +19,7 @@ export const IPC = {
   OpenExternal: 'app:openExternal',
   UpdateGetState: 'update:getState',
   UpdateInstall: 'update:install',
+  ChatStart: 'chat:start',
 
   // 事件（主 → 渲染）
   EvAuthChanged: 'ev:authChanged',

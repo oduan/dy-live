@@ -33,12 +33,7 @@ const liveList = new LiveListService({
   broadcast
 })
 const chat = new ChatService({ sessions, broadcast })
-const watcher = new RoomWatcherService({
-  api,
-  chat,
-  chatEnabled: () => store.get().settings.chatVisible,
-  broadcast
-})
+const watcher = new RoomWatcherService({ api, chat, broadcast })
 const updater = new UpdateService(broadcast)
 
 function handleAuthChange(loggedIn: boolean): void {
@@ -108,13 +103,11 @@ if (!gotLock) {
       store,
       ensureProfileAsync,
       updater,
-      chatToggle: (visible) => {
+      chatStart: () => {
         const cur = watcher.getCurrentRoom()
-        if (visible && cur?.roomId) {
-          chat.start({ roomId: cur.roomId, webRid: cur.webRid })
-        } else {
-          chat.stop()
-        }
+        if (!cur?.roomId) return false
+        chat.start({ roomId: cur.roomId, webRid: cur.webRid })
+        return true
       }
     })
     liveList.start()

@@ -23,7 +23,7 @@ export interface StoreShape {
 
 const DEFAULTS: StoreShape = {
   v: 1,
-  settings: { refreshIntervalSec: 300, volume: 0.8, muted: false, chatVisible: false },
+  settings: { refreshIntervalSec: 300, volume: 0.8, muted: false },
   cache: {},
   window: { width: 1280, height: 820 }
 }

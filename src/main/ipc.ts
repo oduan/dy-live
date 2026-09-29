@@ -13,8 +13,8 @@ export interface IpcContext {
   store: StoreLike
   ensureProfileAsync: () => void
   updater: UpdaterLike
-  /** 弹幕开关实时切换：对当前房间立即建连/断开 */
-  chatToggle: (visible: boolean) => void
+  /** 弹幕：用户在房间内打开弹幕开关时对当前房间建连 */
+  chatStart: () => boolean
 }
 
 interface UpdaterLike {
@@ -73,13 +73,11 @@ export function registerIpc(ctx: IpcContext): void {
     const next: Settings = {
       refreshIntervalSec: clamp(Number(patch?.refreshIntervalSec ?? cur.refreshIntervalSec) || 300, 120, 1800),
       volume: clamp(Number(patch?.volume ?? cur.volume), 0, 1),
-      muted: typeof patch?.muted === 'boolean' ? patch.muted : cur.muted,
-      chatVisible: typeof patch?.chatVisible === 'boolean' ? patch.chatVisible : cur.chatVisible
+      muted: typeof patch?.muted === 'boolean' ? patch.muted : cur.muted
     }
     const intervalChanged = next.refreshIntervalSec !== cur.refreshIntervalSec
     ctx.store.patch({ settings: next })
     if (intervalChanged) ctx.liveList.rearm()
-    if (next.chatVisible !== cur.chatVisible) ctx.chatToggle(next.chatVisible)
     return next
   })
 
@@ -107,4 +105,5 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(IPC.UpdateGetState, () => ctx.updater.getState())
   ipcMain.handle(IPC.UpdateInstall, () => ok(ctx.updater.startDownload()))
+  ipcMain.handle(IPC.ChatStart, () => ok(ctx.chatStart()))
 }

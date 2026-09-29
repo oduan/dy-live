@@ -6,7 +6,7 @@ import { Sidebar } from './components/Sidebar'
 import { PlayerPane } from './components/PlayerPane'
 import { IconLogo } from './components/Icons'
 
-const DEFAULT_SETTINGS: Settings = { refreshIntervalSec: 300, volume: 0.8, muted: false, chatVisible: false }
+const DEFAULT_SETTINGS: Settings = { refreshIntervalSec: 300, volume: 0.8, muted: false }
 
 export default function App() {
   const [auth, setAuth] = useState<{ status: 'checking' | 'out' | 'in'; profile: ProfileInfo | null }>({
@@ -150,10 +150,8 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
             item={selected}
             volume={settings.volume}
             muted={settings.muted}
-            chatVisible={settings.chatVisible}
             onVolume={(v) => persistSettings({ volume: v })}
             onMuted={(m) => persistSettings({ muted: m })}
-            onChatVisible={(v) => persistSettings({ chatVisible: v })}
           />
         ) : (
           <div className="pane-empty">

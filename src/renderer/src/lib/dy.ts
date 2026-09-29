@@ -43,6 +43,7 @@ export const api = {
 
   updateGetState: () => inv<UpdateStateEvent | null>(IPC.UpdateGetState),
   updateInstall: () => inv<IpcResult<boolean>>(IPC.UpdateInstall),
+  chatStart: () => inv<boolean>(IPC.ChatStart),
 
   onAuthChanged: (cb: (e: AuthChangedEvent) => void) => dy.on(IPC.EvAuthChanged, cb as (d: unknown) => void),
   onListAutoUpdated: (cb: (e: ListResult) => void) => dy.on(IPC.EvListAutoUpdated, cb as (d: unknown) => void),

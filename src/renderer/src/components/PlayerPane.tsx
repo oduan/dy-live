@@ -42,10 +42,8 @@ export interface PlayerPaneProps {
   item: LiveItem
   volume: number
   muted: boolean
-  chatVisible: boolean
   onVolume: (v: number) => void
   onMuted: (m: boolean) => void
-  onChatVisible: (v: boolean) => void
 }
 
 export function PlayerPane(p: PlayerPaneProps) {
@@ -60,6 +58,10 @@ export function PlayerPane(p: PlayerPaneProps) {
   const [sleepLeft, setSleepLeft] = useState(0)
   const [timerOpen, setTimerOpen] = useState(false)
   const [chat, setChat] = useState<ChatItem[]>([])
+  /** 弹幕面板显隐（随切房重置为关） */
+  const [chatOpen, setChatOpen] = useState(false)
+  /** 本房间内是否已开过弹幕（开过之后连接一直保持到切房） */
+  const [chatActive, setChatActive] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const paneRef = useRef<HTMLDivElement>(null)
@@ -398,6 +400,16 @@ export function PlayerPane(p: PlayerPaneProps) {
   const info = st.info
   const webRid = info?.webRid || item.webRid
   const browserUrl = `https://live.douyin.com/${webRid || item.roomId}`
+  /** 弹幕开关：首次打开对本房间建连（连接保持到切房），之后只切换面板显隐 */
+  const toggleChat = useCallback((): void => {
+    if (!chatActive) {
+      setChatActive(true)
+      setChatOpen(true)
+      void api.chatStart()
+      return
+    }
+    setChatOpen((v) => !v)
+  }, [chatActive])
   // 语音/电台房强制走音频界面：这类流的视频轨常为不可解码编码（如 H.265）或纯黑占位，
   // 仅靠 videoWidth===0 的运行时判定会漏（有轨但解不出画面 → 黑屏）
   const audioMode = st.audioOnly || info?.typeHint === 'voice' || info?.typeHint === 'audio'
@@ -569,9 +581,9 @@ export function PlayerPane(p: PlayerPaneProps) {
             />
           </div>
           <button
-            className={cx('ctl', p.chatVisible && 'ctl-on')}
-            onClick={() => p.onChatVisible(!p.chatVisible)}
-            title="公屏弹幕聊天"
+            className={cx('ctl', chatActive && 'ctl-on')}
+            onClick={toggleChat}
+            title={chatActive ? '弹幕（已连接，点击显示/隐藏面板）' : '开启弹幕'}
           >
             <IconChat />
           </button>
@@ -639,11 +651,11 @@ export function PlayerPane(p: PlayerPaneProps) {
       </div>
 
       {/* 公屏弹幕停靠栏：占据右侧，视频区随之左移 */}
-      {p.chatVisible && (
+      {chatOpen && (
         <aside className="chat-dock">
           <div className="chat-head">
             <span>弹幕</span>
-            <button className="chat-close" onClick={() => p.onChatVisible(false)} title="关闭">
+            <button className="chat-close" onClick={() => setChatOpen(false)} title="关闭">
               ×
             </button>
           </div>
@@ -651,14 +663,24 @@ export function PlayerPane(p: PlayerPaneProps) {
             {chat.length === 0 ? (
               <div className="chat-empty">{st.phase === 'live' ? '暂无弹幕' : '未在直播中'}</div>
             ) : (
-              chat.map((m, i) => (
-                <div className="chat-item" key={i}>
-                  <span className="chat-nick" style={{ color: `hsl(${m.color} 70% 68%)` }}>
-                    {m.nick}
-                  </span>
-                  <span className="chat-text">{m.content}</span>
-                </div>
-              ))
+              chat.map((m, i) =>
+                m.kind === 'sys' ? (
+                  <div className="chat-sys" key={i}>
+                    {m.content}
+                  </div>
+                ) : m.kind === 'gift' ? (
+                  <div className="chat-gift" key={i}>
+                    <span className="chat-nick">{m.nick}</span> {m.content}
+                  </div>
+                ) : (
+                  <div className="chat-item" key={i}>
+                    <span className="chat-nick" style={{ color: `hsl(${m.color} 70% 68%)` }}>
+                      {m.nick}
+                    </span>
+                    <span className="chat-text">：{m.content}</span>
+                  </div>
+                )
+              )
             )}
           </div>
         </aside>
