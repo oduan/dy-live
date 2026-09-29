@@ -622,7 +622,6 @@ function AudioBackdrop(props: {
         </div>
         <div className="audio-name">{props.nickname}</div>
         <div className="audio-title">{props.title}</div>
-        <div className="audio-hint">音频直播中</div>
       </div>
     </div>
   )

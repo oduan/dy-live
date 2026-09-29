@@ -1081,13 +1081,6 @@ img {
   text-overflow: ellipsis;
 }
 
-.audio-hint {
-  margin-top: 6px;
-  color: var(--accent-2);
-  font-size: 12px;
-  letter-spacing: 2px;
-}
-
 .eq {
   display: flex;
   align-items: flex-end;
