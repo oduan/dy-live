@@ -40,8 +40,8 @@ export class ChatService {
   private flushTimer: NodeJS.Timeout | undefined
   private reconnectTimer: NodeJS.Timeout | undefined
   private buffer: ChatItem[] = []
-  private seenIds = new Set<string>()
-  private seenQueue: string[] = []
+  /** 去重键（msg_id 优先，缺省用 昵称+内容）→ 最近出现时间 */
+  private seenKeys = new Map<string, number>()
   private cursor = ''
   private internalExt = ''
   private attempts = 0
@@ -60,8 +60,6 @@ export class ChatService {
     this.cursor = ''
     this.internalExt = ''
     this.buffer = []
-    this.seenIds = new Set()
-    this.seenQueue = []
     void this.connect()
   }
 
@@ -249,20 +247,23 @@ export class ChatService {
     const content = fstr(cm.get(3)?.[0])
     const user = cm.get(2)?.[0]
     if (!content || !user) return
-    // IM 服务器会经多路由重复投递同一条消息，按 common.msg_id 去重
-    const common = cm.get(1)?.[0]
-    const msgId = common ? fstr(decodeFields(common.bytes).get(2)?.[0]) : ''
-    if (msgId) {
-      if (this.seenIds.has(msgId)) return
-      this.seenIds.add(msgId)
-      this.seenQueue.push(msgId)
-      if (this.seenQueue.length > 800) {
-        for (const id of this.seenQueue.splice(0, 400)) this.seenIds.delete(id)
-      }
-    }
     const u = decodeFields(user.bytes)
     const nick = fstr(u.get(3)?.[0])
     if (!nick) return
+    // IM 服务器会经多路由重复投递：msg_id 相同视为重复；msg_id 缺失时按 昵称+内容 在 3s 窗口内去重
+    const common = cm.get(1)?.[0]
+    const msgId = common ? fstr(decodeFields(common.bytes).get(2)?.[0]) : ''
+    const key = msgId || `${nick}\u0001${content}`
+    const now = Date.now()
+    const last = this.seenKeys.get(key)
+    if (last !== undefined && now - last < 3_000) return
+    this.seenKeys.set(key, now)
+    if (this.seenKeys.size > 800) {
+      for (const [k, t] of this.seenKeys) {
+        if (now - t > 120_000) this.seenKeys.delete(k)
+      }
+      if (this.seenKeys.size > 800) this.seenKeys.clear()
+    }
     if (!this.gotMsg) {
       this.gotMsg = true
       log('chat', '已收到首条弹幕')
