@@ -1,6 +1,7 @@
 import type { RoomEnterResult, RoomInfo, RoomStatusEvent } from '@shared/types'
 import { IPC } from '@shared/ipc'
 import type { DouyinApi } from './api'
+import type { ChatService } from './chat'
 import { log } from '../util'
 
 /** 活跃房间轮询间隔：60s + 抖动（仅对当前观看的一个房间轮询） */
@@ -12,6 +13,7 @@ const MANUAL_CHECK_DEBOUNCE = 8_000
 
 export interface RoomWatcherDeps {
   api: DouyinApi
+  chat: ChatService
   broadcast: (channel: string, payload: unknown) => void
 }
 
@@ -36,6 +38,10 @@ export class RoomWatcherService {
       this.cur = { roomId: res.info.roomId || ref.roomId, webRid: res.info.webRid || ref.webRid }
       this.lastEvent = this.toEvent(res.info)
       this.startTimer()
+      // 公屏弹幕：跟随当前观看的房间（语音/电台房 enter 无数据，走 feed 兜底的 info 同样带 roomId）
+      this.deps.chat.start({ roomId: this.cur.roomId ?? '', webRid: this.cur.webRid })
+    } else {
+      this.deps.chat.stop()
     }
     return res
   }
@@ -43,6 +49,7 @@ export class RoomWatcherService {
   async teardown(): Promise<void> {
     this.stopTimer()
     this.cur = null
+    this.deps.chat.stop()
   }
 
   private startTimer(): void {

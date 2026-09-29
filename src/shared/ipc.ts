@@ -27,7 +27,8 @@ export const IPC = {
   EvRoomStatus: 'ev:roomStatus',
   EvNetBlocked: 'ev:netBlocked',
   EvNetRecovered: 'ev:netRecovered',
-  EvUpdateState: 'ev:updateState'
+  EvUpdateState: 'ev:updateState',
+  EvChatMessage: 'ev:chatMessage'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

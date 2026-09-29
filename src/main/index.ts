@@ -9,6 +9,7 @@ import { DouyinApi } from './douyin/api'
 import { RequestQueue } from './douyin/queue'
 import { LiveListService } from './douyin/liveList'
 import { RoomWatcherService } from './douyin/roomWatcher'
+import { ChatService } from './douyin/chat'
 import { UpdateService } from './updater'
 import { log } from './util'
 
@@ -31,7 +32,8 @@ const liveList = new LiveListService({
   isLoggedIn: () => sessions.isLoggedIn(),
   broadcast
 })
-const watcher = new RoomWatcherService({ api, broadcast })
+const chat = new ChatService({ sessions, broadcast })
+const watcher = new RoomWatcherService({ api, chat, broadcast })
 const updater = new UpdateService(broadcast)
 
 function handleAuthChange(loggedIn: boolean): void {

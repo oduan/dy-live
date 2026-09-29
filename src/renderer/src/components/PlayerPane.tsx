@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { LiveItem, RoomEnterResult, RoomInfo, StreamChoice } from '@shared/types'
+import type { ChatItem, LiveItem, RoomEnterResult, RoomInfo, StreamChoice } from '@shared/types'
 import { api } from '../lib/dy'
 import { LiveStreamPlayer } from '../lib/player'
 import { AudioRing } from './AudioRing'
@@ -59,9 +59,11 @@ export function PlayerPane(p: PlayerPaneProps) {
   const [sleepAt, setSleepAt] = useState(0)
   const [sleepLeft, setSleepLeft] = useState(0)
   const [timerOpen, setTimerOpen] = useState(false)
+  const [chat, setChat] = useState<ChatItem[]>([])
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const paneRef = useRef<HTMLDivElement>(null)
+  const chatListRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<LiveStreamPlayer | null>(null)
   const audioGraphRef = useRef<AudioContext | null>(null)
   const candsRef = useRef<StreamChoice[]>([])
@@ -317,6 +319,22 @@ export function PlayerPane(p: PlayerPaneProps) {
     return off
   }, [item.roomId, freezeEnd, toast])
 
+  // ---------- 公屏弹幕 ----------
+  useEffect(() => {
+    const off = api.onChatMessage((e) => {
+      if (!e || e.roomId !== item.roomId) return
+      setChat((list) => [...list, ...e.items].slice(-150))
+    })
+    return off
+  }, [item.roomId])
+
+  // 新消息自动吸底（用户上翻时暂停跟随）
+  useEffect(() => {
+    const el = chatListRef.current
+    if (!el) return
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) el.scrollTop = el.scrollHeight
+  }, [chat])
+
   // ---------- 全屏 / UI 显隐 / 快捷键 ----------
   const toggleFullscreen = useCallback(async (): Promise<void> => {
     try {
@@ -449,8 +467,19 @@ export function PlayerPane(p: PlayerPaneProps) {
               ×
             </button>
           </div>
-          <div className="chat-list">
-            <div className="chat-empty">暂无弹幕</div>
+          <div className="chat-list" ref={chatListRef}>
+            {chat.length === 0 ? (
+              <div className="chat-empty">暂无弹幕</div>
+            ) : (
+              chat.map((m, i) => (
+                <div className="chat-item" key={i}>
+                  <span className="chat-nick" style={{ color: `hsl(${m.color} 70% 68%)` }}>
+                    {m.nick}
+                  </span>
+                  <span className="chat-text">{m.content}</span>
+                </div>
+              ))
+            )}
           </div>
         </aside>
       )}

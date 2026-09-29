@@ -11,6 +11,7 @@ import type {
   RoomEnterResult,
   RoomStatusEvent,
   Settings,
+  ChatEvent,
   UpdateStateEvent
 } from '@shared/types'
 
@@ -49,5 +50,6 @@ export const api = {
   onRoomStatus: (cb: (e: RoomStatusEvent) => void) => dy.on(IPC.EvRoomStatus, cb as (d: unknown) => void),
   onNetBlocked: (cb: (e: NetBlockedEvent) => void) => dy.on(IPC.EvNetBlocked, cb as (d: unknown) => void),
   onNetRecovered: (cb: () => void) => dy.on(IPC.EvNetRecovered, cb as () => void),
-  onUpdateState: (cb: (e: UpdateStateEvent) => void) => dy.on(IPC.EvUpdateState, cb as (d: unknown) => void)
+  onUpdateState: (cb: (e: UpdateStateEvent) => void) => dy.on(IPC.EvUpdateState, cb as (d: unknown) => void),
+  onChatMessage: (cb: (e: ChatEvent) => void) => dy.on(IPC.EvChatMessage, cb as (d: unknown) => void)
 }

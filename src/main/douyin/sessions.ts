@@ -90,10 +90,14 @@ export class DouyinSessions {
   private authChange?: (loggedIn: boolean) => void
   private authEvaluateTimer: ReturnType<typeof setTimeout> | undefined
   private loggedIn = false
+  private ua = ''
+  /** 调试：捕获页面自建的 douyin wss 连接 URL（弹幕参数对照用） */
+  private capturedWS: string[] = []
 
   init(onAuthChange: (loggedIn: boolean) => void): void {
     this.authChange = onAuthChange
     const ua = cleanUserAgent(app.userAgentFallback || '')
+    this.ua = ua
     app.userAgentFallback = ua
     for (const [tag, ses] of [
       ['default', session.defaultSession],
@@ -123,10 +127,14 @@ export class DouyinSessions {
         callback(true)
       })
     }
-    // 隐藏窗口不加载媒体/字体，节省资源
+    // 隐藏窗口不加载媒体/字体，节省资源；顺带捕获页面自建的 douyin 弹幕 WS 连接
     for (const ses of [this.authSession, this.guestSession]) {
-      ses.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details, cb) => {
+      ses.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'wss://*/*'] }, (details, cb) => {
         const t = details.resourceType
+        if (t === 'webSocket' && details.url.includes('douyin.com')) {
+          this.capturedWS.push(details.url)
+          if (this.capturedWS.length > 8) this.capturedWS.shift()
+        }
         cb(t === 'media' || t === 'font' ? ({ cancel: true } as any) : ({} as any))
       })
     }
@@ -225,6 +233,98 @@ export class DouyinSessions {
   }
 
   // ---------- 隐藏 guest 页（游客态，直播 webcast 接口） ----------
+
+  /** 读取 guest 会话下 douyin 域的指定 Cookie */
+  async getGuestCookie(name: string): Promise<string> {
+    try {
+      const cookies = await this.guestSession.cookies.get({ domain: 'douyin.com' })
+      return cookies.find((c) => c.name === name)?.value ?? ''
+    } catch {
+      return ''
+    }
+  }
+
+  /** guest 会话 douyin Cookie 的请求头形态（WS 升级请求需要带 ttwid 等） */
+  async getGuestCookieHeader(): Promise<string> {
+    try {
+      const cookies = await this.guestSession.cookies.get({ domain: 'douyin.com' })
+      return cookies.map((c) => `${c.name}=${c.value}`).join('; ')
+    } catch {
+      return ''
+    }
+  }
+
+  getUserAgent(): string {
+    return this.ua
+  }
+
+  getCapturedWS(): string[] {
+    return this.capturedWS
+  }
+
+  /**
+   * 借 guest 页进一次直播间，捕获页面自建的弹幕 WS 连接 URL（含合法签名与游标），
+   * 然后页面回到首页（页面自己的连接断开，不影响调用方用捕获的 URL 建连）。
+   */
+  async captureRoomWSUrl(webRid: string, roomId: string): Promise<string> {
+    try {
+      const wc = await this.ensureGuest()
+      await wc.loadURL(`https://live.douyin.com/${webRid}`)
+      await sleep(7_000)
+      await wc.loadURL('https://live.douyin.com/').catch(() => undefined)
+      const hit = this.capturedWS
+        .filter((u) => u.includes('/webcast/im/push/v2/') && u.includes(`room_id=${roomId}`))
+        .pop()
+      return hit ?? ''
+    } catch (e) {
+      log('chat', '捕获弹幕连接参数失败:', (e as Error)?.message)
+      return ''
+    }
+  }
+
+  /** guest 页是否具备 byted_acrawler 签名能力 */
+  async hasSigner(): Promise<boolean> {
+    try {
+      const wc = await this.ensureGuest()
+      return await wc.executeJavaScript(
+        `!!(window.byted_acrawler && typeof window.byted_acrawler.frontierSign === 'function')`,
+        false
+      )
+    } catch {
+      return false
+    }
+  }
+
+  /** 在 guest 页面上下文调用抖音 frontierSign（IM 弹幕 WS 的 signature 参数） */
+  async frontierSign(input: string): Promise<string> {
+    try {
+      const wc = await this.ensureGuest()
+      const expr = `(() => {
+        const ba = window.byted_acrawler
+        if (!ba || typeof ba.frontierSign !== 'function') return { __missing: true }
+        try {
+          return ba.frontierSign(${JSON.stringify(input)})
+        } catch (e) {
+          return { __error: String(e) }
+        }
+      })()`
+      const r = (await wc.executeJavaScript(expr, false)) as unknown
+      log('chat', 'frontierSign 原始返回:', JSON.stringify(r)?.slice(0, 200))
+      if (typeof r === 'string') return r
+      if (r && typeof r === 'object') {
+        const o = r as Record<string, unknown>
+        for (const key of ['signature', 'X-Bogus']) {
+          if (typeof o[key] === 'string') return o[key] as string
+        }
+        const v = Object.values(o).find((x) => typeof x === 'string' && (x as string).length > 8)
+        return typeof v === 'string' ? v : ''
+      }
+      return ''
+    } catch (e) {
+      log('chat', 'frontierSign 执行失败:', (e as Error)?.message)
+      return ''
+    }
+  }
 
   async ensureGuest(): Promise<WebContents> {
     if (this.guestWin && !this.guestWin.isDestroyed() && this.guestReady) return this.guestWin.webContents

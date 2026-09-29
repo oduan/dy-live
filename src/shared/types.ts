@@ -120,6 +120,19 @@ export interface UpdateStateEvent {
   message?: string
 }
 
+/** 公屏弹幕消息（主进程 → 渲染进程，批量推送） */
+export interface ChatItem {
+  nick: string
+  /** 昵称展示色（HSL hue） */
+  color: number
+  content: string
+}
+
+export interface ChatEvent {
+  roomId: string
+  items: ChatItem[]
+}
+
 /** IPC 返回的统一包装 */
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; message: string }
 
