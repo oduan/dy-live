@@ -8,9 +8,9 @@ files:
   - "!**/*.map"
 win:
   target:
-    - nsis
-  arch:
-    - x64
+    - target: nsis
+      arch:
+        - x64
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
@@ -20,4 +20,5 @@ mac:
     - dmg
   category: public.app-category.entertainment
   artifactName: ${productName}-${version}-${arch}.${ext}
-# 如需自定义图标：放置 build/icon.ico（Windows）与 build/icon.icns（macOS）
+# 图标：build/icon.ico（Windows）与 build/icon.icns（macOS），由 scripts/gen-icons.mjs 生成
+# 修改图标：改脚本里的 SVG 后运行 npm i --no-save sharp && node scripts/gen-icons.mjs
