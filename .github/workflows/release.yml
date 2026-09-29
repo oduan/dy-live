@@ -1,0 +1,85 @@
+name: Release
+
+# 推送 v 开头的 tag（如 v0.1.0）时触发：打包 Windows/macOS 安装包并发布 GitHub Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # 防止 tag 版本号与 package.json 不一致导致发出错误版本的安装包
+      - name: 校验 tag 与 package.json 版本一致
+        shell: bash
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::tag v$TAG_VERSION 与 package.json 中的版本 $PKG_VERSION 不一致，请先更新版本号"
+            exit 1
+          fi
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 打包 Windows 安装包 (NSIS)
+        if: runner.os == 'Windows'
+        run: npm run dist:win -- --publish never
+
+      - name: 打包 macOS 安装包 (DMG, x64 + arm64)
+        if: runner.os == 'macOS'
+        run: npm run dist:mac -- --x64 --arm64 --publish never
+
+      - name: 上传 Windows 安装包
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows
+          path: release/*.exe
+          if-no-files-found: error
+
+      - name: 上传 macOS 安装包
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos
+          path: release/*.dmg
+          if-no-files-found: error
+
+  release:
+    name: 发布 GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载所有平台的安装包
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 创建 Release 并上传安装包
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
