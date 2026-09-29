@@ -37,7 +37,7 @@ export function LoginGate() {
         <p className="brand-sub">抖音关注直播 · 桌面观看</p>
         <ul className="brand-points">
           <li>登录后自动汇总「关注」中正在直播的主播</li>
-          <li>视频直播 / 音频直播 / 语音厅 均可观看</li>
+          <li>视频直播 / 音频直播 / 电台 均可观看</li>
           <li>直播画面以<b>游客身份</b>加载，与你的账号隔离</li>
           <li>登录凭证仅保存在本机，不会上传</li>
         </ul>

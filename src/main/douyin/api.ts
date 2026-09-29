@@ -136,6 +136,7 @@ export class DouyinApi {
         nickname: room.owner?.nickname ?? '',
         avatarUrl: avatar,
         coverUrl: firstUrl(room.cover) || avatar,
+        backgroundUrl: extractBackground(room, hit),
         status: 2,
         viewerCountText: viewers === undefined ? '' : String(viewers),
         streams,
@@ -211,6 +212,7 @@ export class DouyinApi {
       nickname: ri.owner?.nickname ?? d?.user?.nickname ?? '',
       avatarUrl: firstUrl(ri.owner?.avatar_thumb, d?.user?.avatar_thumb),
       coverUrl: firstUrl(ri.cover, ri.cover_url, d?.user?.avatar_thumb),
+      backgroundUrl: extractBackground(ri, roomEl, d),
       status: typeof ri.status === 'number' ? ri.status : typeof ri.live_status === 'number' ? ri.live_status : 0,
       viewerCountText: views === undefined || views === null ? '' : String(views),
       streams,
@@ -269,6 +271,27 @@ function normalizeLiveEntry(e: any): LiveItem | null {
       (typeof room?.user_count === 'number' ? room.user_count : parseCountText(room?.room_view_stats?.display_value)),
     status: 2
   }
+}
+
+/**
+ * 从房间对象里尽量找出直播背景图。字段名随版本漂移：先试已知键名，
+ * 再按 /back|bg/i 键名模糊匹配（值为 {url_list:[...]} 形态的图片对象）。
+ */
+function extractBackground(...objs: any[]): string {
+  for (const o of objs) {
+    if (!o || typeof o !== 'object') continue
+    const hit = firstUrl(o.background, o.bg_img_url, o.background_url, o.dynamic_background, o.wallpaper)
+    if (hit) return hit
+  }
+  for (const o of objs) {
+    if (!o || typeof o !== 'object') continue
+    for (const [k, v] of Object.entries(o)) {
+      if (!/back|bg/i.test(k) || !v || typeof v !== 'object' || Array.isArray(v)) continue
+      const u = firstUrl(v)
+      if (u) return u
+    }
+  }
+  return ''
 }
 
 /**

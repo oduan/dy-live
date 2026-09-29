@@ -375,8 +375,8 @@ export function PlayerPane(p: PlayerPaneProps) {
   const audioMode = st.audioOnly || info?.typeHint === 'voice' || info?.typeHint === 'audio'
   const kindBadge = st.audioOnly
     ? { label: '音频直播', Icon: IconHeadphones }
-    : info?.typeHint === 'voice'
-      ? { label: '语音厅', Icon: IconHeadphones }
+      : info?.typeHint === 'voice'
+        ? { label: '电台', Icon: IconHeadphones }
       : info?.typeHint === 'audio'
         ? { label: '音频直播', Icon: IconHeadphones }
         : info?.typeHint === 'video'
@@ -403,7 +403,7 @@ export function PlayerPane(p: PlayerPaneProps) {
         />
         {audioMode && (st.phase === 'live' || st.phase === 'ended') && (
           <AudioBackdrop
-            cover={info?.coverUrl || item.coverUrl}
+            bg={info?.backgroundUrl || info?.coverUrl || item.coverUrl}
             avatar={info?.avatarUrl || item.avatarUrl}
             title={info?.title || item.title}
             nickname={info?.nickname || item.nickname}
@@ -603,9 +603,9 @@ export function PlayerPane(p: PlayerPaneProps) {
   )
 }
 
-/** 纯音频直播（电台 / 语音厅）画面：封面背景 + 头像呼吸 + 律动条 */
+/** 纯音频直播（电台）画面：背景图 + 头像呼吸 + 律动条 */
 function AudioBackdrop(props: {
-  cover?: string
+  bg?: string
   avatar?: string
   title: string
   nickname: string
@@ -614,7 +614,7 @@ function AudioBackdrop(props: {
 }) {
   return (
     <div className={props.dimmed ? 'audio-backdrop dimmed' : 'audio-backdrop'}>
-      {props.cover && <img className="audio-bg" src={props.cover} alt="" referrerPolicy="no-referrer" />}
+      {props.bg && <img className="audio-bg" src={props.bg} alt="" referrerPolicy="no-referrer" />}
       <div className="audio-card">
         <div className="audio-avatar">
           {props.avatar ? <img src={props.avatar} alt="" referrerPolicy="no-referrer" /> : <IconLogo size={44} />}

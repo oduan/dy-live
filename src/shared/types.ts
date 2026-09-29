@@ -49,6 +49,8 @@ export interface RoomInfo {
   nickname: string
   avatarUrl?: string
   coverUrl?: string
+  /** 直播间背景图（电台/语音房展示用；部分房间不下发，回退 coverUrl） */
+  backgroundUrl?: string
   /** 2 = 直播中，4 = 已结束 */
   status: number
   viewerCountText?: string
