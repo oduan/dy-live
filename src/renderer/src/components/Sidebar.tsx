@@ -9,7 +9,6 @@ export interface SidebarProps {
   items: LiveItem[]
   hasMore: boolean
   total: number
-  updatedAt: number
   phase: 'loading' | 'ready' | 'error'
   errorMsg: string
   loadingMore: boolean

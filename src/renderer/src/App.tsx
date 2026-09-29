@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LiveItem, ListResult, ProfileInfo, Settings } from '@shared/types'
 import { api } from './lib/dy'
-import { formatClock } from './lib/format'
 import { LoginGate } from './components/LoginGate'
 import { Sidebar } from './components/Sidebar'
 import { PlayerPane } from './components/PlayerPane'
@@ -39,7 +38,6 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
   const [items, setItems] = useState<LiveItem[]>([])
   const [hasMore, setHasMore] = useState(false)
   const [total, setTotal] = useState(0)
-  const [updatedAt, setUpdatedAt] = useState(0)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMsg, setErrorMsg] = useState('')
   const [loadingMore, setLoadingMore] = useState(false)
@@ -56,7 +54,6 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
     setItems(d.items)
     setHasMore(d.hasMore)
     setTotal(d.total)
-    setUpdatedAt(d.updatedAt)
     setPhase('ready')
     setErrorMsg('')
   }, [])
@@ -80,7 +77,6 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
     void api.listGetCached().then((r) => {
       if (r.ok && r.data?.items?.length) {
         setItems(r.data.items)
-        setUpdatedAt(r.data.at)
         setPhase('ready')
       }
     })
@@ -133,7 +129,6 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
         items={items}
         hasMore={hasMore}
         total={total}
-        updatedAt={updatedAt}
         phase={!booted && phase === 'ready' && items.length === 0 ? 'loading' : phase}
         errorMsg={errorMsg}
         loadingMore={loadingMore}
@@ -162,8 +157,6 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
           <div className="pane-empty">
             <IconLogo size={56} />
             <h2>选择一个正在直播的主播</h2>
-            <p>左侧为「关注」中正在直播的列表 · 点击即可在右侧观看</p>
-            {updatedAt > 0 && <p className="dim">列表更新于 {formatClock(updatedAt)} · 定时自动刷新</p>}
           </div>
         )}
       </main>
