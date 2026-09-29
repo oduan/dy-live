@@ -33,7 +33,12 @@ const liveList = new LiveListService({
   broadcast
 })
 const chat = new ChatService({ sessions, broadcast })
-const watcher = new RoomWatcherService({ api, chat, broadcast })
+const watcher = new RoomWatcherService({
+  api,
+  chat,
+  chatEnabled: () => store.get().settings.chatVisible,
+  broadcast
+})
 const updater = new UpdateService(broadcast)
 
 function handleAuthChange(loggedIn: boolean): void {
@@ -96,7 +101,22 @@ if (!gotLock) {
     store.load()
     sessions.init(handleAuthChange)
     wireQueueBackoff()
-    registerIpc({ sessions, liveList, watcher, store, ensureProfileAsync, updater })
+    registerIpc({
+      sessions,
+      liveList,
+      watcher,
+      store,
+      ensureProfileAsync,
+      updater,
+      chatToggle: (visible) => {
+        const cur = watcher.getCurrentRoom()
+        if (visible && cur?.roomId) {
+          chat.start({ roomId: cur.roomId, webRid: cur.webRid })
+        } else {
+          chat.stop()
+        }
+      }
+    })
     liveList.start()
     updater.start()
     mainWindow = createMainWindow()

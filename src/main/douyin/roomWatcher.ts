@@ -14,6 +14,8 @@ const MANUAL_CHECK_DEBOUNCE = 8_000
 export interface RoomWatcherDeps {
   api: DouyinApi
   chat: ChatService
+  /** 弹幕开关（设置实时读取）：关闭时不建连，降低请求面 */
+  chatEnabled: () => boolean
   broadcast: (channel: string, payload: unknown) => void
 }
 
@@ -38,12 +40,20 @@ export class RoomWatcherService {
       this.cur = { roomId: res.info.roomId || ref.roomId, webRid: res.info.webRid || ref.webRid }
       this.lastEvent = this.toEvent(res.info)
       this.startTimer()
-      // 公屏弹幕：跟随当前观看的房间（语音/电台房 enter 无数据，走 feed 兜底的 info 同样带 roomId）
-      this.deps.chat.start({ roomId: this.cur.roomId ?? '', webRid: this.cur.webRid })
+      // 公屏弹幕：跟随当前观看的房间；开关关闭时不建连（省资源、降低风控面）
+      if (this.deps.chatEnabled()) {
+        this.deps.chat.start({ roomId: this.cur.roomId ?? '', webRid: this.cur.webRid })
+      } else {
+        this.deps.chat.stop()
+      }
     } else {
       this.deps.chat.stop()
     }
     return res
+  }
+
+  getCurrentRoom(): { roomId?: string; webRid?: string } | null {
+    return this.cur
   }
 
   async teardown(): Promise<void> {

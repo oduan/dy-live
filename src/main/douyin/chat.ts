@@ -40,6 +40,8 @@ export class ChatService {
   private flushTimer: NodeJS.Timeout | undefined
   private reconnectTimer: NodeJS.Timeout | undefined
   private buffer: ChatItem[] = []
+  private seenIds = new Set<string>()
+  private seenQueue: string[] = []
   private cursor = ''
   private internalExt = ''
   private attempts = 0
@@ -58,6 +60,8 @@ export class ChatService {
     this.cursor = ''
     this.internalExt = ''
     this.buffer = []
+    this.seenIds = new Set()
+    this.seenQueue = []
     void this.connect()
   }
 
@@ -65,8 +69,10 @@ export class ChatService {
     this.stopped = true
     clearInterval(this.hbTimer)
     clearTimeout(this.flushTimer)
+    this.flushTimer = undefined
     clearTimeout(this.reconnectTimer)
-    if (this.flushTimer) this.flushNow()
+    // 切房/退出：旧房间的缓冲直接丢弃（flush 会把旧房间的消息推给新房间的渲染层）
+    this.buffer = []
     if (this.ws) {
       const ws = this.ws
       this.ws = null
@@ -237,12 +243,23 @@ export class ChatService {
     }
   }
 
-  /** ChatMessage{ common=1, user=2, content=3 }；User{ id=1, nick_name=3 } */
+  /** ChatMessage{ common=1, user=2, content=3 }；Common{ method=1, msg_id=2 }；User{ id=1, nick_name=3 } */
   private onChat(buf: Buffer): void {
     const cm = decodeFields(buf)
     const content = fstr(cm.get(3)?.[0])
     const user = cm.get(2)?.[0]
     if (!content || !user) return
+    // IM 服务器会经多路由重复投递同一条消息，按 common.msg_id 去重
+    const common = cm.get(1)?.[0]
+    const msgId = common ? fstr(decodeFields(common.bytes).get(2)?.[0]) : ''
+    if (msgId) {
+      if (this.seenIds.has(msgId)) return
+      this.seenIds.add(msgId)
+      this.seenQueue.push(msgId)
+      if (this.seenQueue.length > 800) {
+        for (const id of this.seenQueue.splice(0, 400)) this.seenIds.delete(id)
+      }
+    }
     const u = decodeFields(user.bytes)
     const nick = fstr(u.get(3)?.[0])
     if (!nick) return

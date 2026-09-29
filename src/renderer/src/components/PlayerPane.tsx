@@ -294,6 +294,14 @@ export function PlayerPane(p: PlayerPaneProps) {
     }
   }, [st.phase])
 
+  // 卸载时释放音频图：AudioContext 每房间创建一个，不关闭会随切房累积泄漏
+  useEffect(() => {
+    return () => {
+      void audioGraphRef.current?.close().catch(() => {})
+      audioGraphRef.current = null
+    }
+  }, [])
+
   // 音量 / 静音
   useEffect(() => {
     const v = videoRef.current
@@ -415,6 +423,8 @@ export function PlayerPane(p: PlayerPaneProps) {
       onMouseMove={bumpUi}
     >
       {/* 视频 / 音频画面层 */}
+      {/* 视频区（弹幕停靠栏占据右侧时整体左移） */}
+      <div className="video-wrap">
       <div className="video-layer">
         <video
           ref={videoRef}
@@ -457,32 +467,6 @@ export function PlayerPane(p: PlayerPaneProps) {
 
       {st.toast && <div className="pane-toast">{st.toast}</div>}
       {st.recovering && st.phase === 'live' && <div className="pane-recovering">信号不稳定，重连中…</div>}
-
-      {/* 公屏弹幕聊天面板（数据源接入前先展示占位） */}
-      {p.chatVisible && (st.phase === 'live' || st.phase === 'ended') && (
-        <aside className="chat-panel">
-          <div className="chat-head">
-            <span>弹幕</span>
-            <button className="chat-close" onClick={() => p.onChatVisible(false)} title="关闭">
-              ×
-            </button>
-          </div>
-          <div className="chat-list" ref={chatListRef}>
-            {chat.length === 0 ? (
-              <div className="chat-empty">暂无弹幕</div>
-            ) : (
-              chat.map((m, i) => (
-                <div className="chat-item" key={i}>
-                  <span className="chat-nick" style={{ color: `hsl(${m.color} 70% 68%)` }}>
-                    {m.nick}
-                  </span>
-                  <span className="chat-text">{m.content}</span>
-                </div>
-              ))
-            )}
-          </div>
-        </aside>
-      )}
 
       {/* 进入中 */}
       {st.phase === 'entering' && (
@@ -651,6 +635,33 @@ export function PlayerPane(p: PlayerPaneProps) {
             <IconFullscreen />
           </button>
         </footer>
+      )}
+      </div>
+
+      {/* 公屏弹幕停靠栏：占据右侧，视频区随之左移 */}
+      {p.chatVisible && (
+        <aside className="chat-dock">
+          <div className="chat-head">
+            <span>弹幕</span>
+            <button className="chat-close" onClick={() => p.onChatVisible(false)} title="关闭">
+              ×
+            </button>
+          </div>
+          <div className="chat-list" ref={chatListRef}>
+            {chat.length === 0 ? (
+              <div className="chat-empty">{st.phase === 'live' ? '暂无弹幕' : '未在直播中'}</div>
+            ) : (
+              chat.map((m, i) => (
+                <div className="chat-item" key={i}>
+                  <span className="chat-nick" style={{ color: `hsl(${m.color} 70% 68%)` }}>
+                    {m.nick}
+                  </span>
+                  <span className="chat-text">{m.content}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
       )}
     </div>
   )

@@ -13,6 +13,8 @@ export interface IpcContext {
   store: StoreLike
   ensureProfileAsync: () => void
   updater: UpdaterLike
+  /** 弹幕开关实时切换：对当前房间立即建连/断开 */
+  chatToggle: (visible: boolean) => void
 }
 
 interface UpdaterLike {
@@ -77,6 +79,7 @@ export function registerIpc(ctx: IpcContext): void {
     const intervalChanged = next.refreshIntervalSec !== cur.refreshIntervalSec
     ctx.store.patch({ settings: next })
     if (intervalChanged) ctx.liveList.rearm()
+    if (next.chatVisible !== cur.chatVisible) ctx.chatToggle(next.chatVisible)
     return next
   })
 

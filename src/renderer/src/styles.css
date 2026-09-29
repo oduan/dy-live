@@ -619,9 +619,18 @@ img {
 .player-pane {
   position: relative;
   flex: 1;
+  display: flex;
   background: #07080b;
   overflow: hidden;
   outline: none;
+}
+
+/* 视频区：弹幕停靠栏打开时 flex 收缩让位 */
+.video-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .player-pane:fullscreen {
@@ -912,21 +921,14 @@ img {
   color: var(--accent-2);
 }
 
-/* 公屏弹幕聊天面板 */
-.chat-panel {
-  position: absolute;
-  top: 52px;
-  right: 12px;
-  bottom: 64px;
-  width: 280px;
+/* 公屏弹幕停靠栏（占据右侧，推挤视频区） */
+.chat-dock {
+  width: 300px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: rgba(10, 12, 18, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  backdrop-filter: blur(10px);
-  z-index: 4;
-  overflow: hidden;
+  background: var(--bg-2);
+  border-left: 1px solid var(--line);
 }
 
 .chat-head {
@@ -937,7 +939,7 @@ img {
   font-size: 12px;
   font-weight: 700;
   color: var(--text-dim);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
 
@@ -955,7 +957,7 @@ img {
 }
 
 .chat-close:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-3);
   color: var(--text);
 }
 
