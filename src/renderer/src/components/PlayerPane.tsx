@@ -5,6 +5,7 @@ import { LiveStreamPlayer } from '../lib/player'
 import { AudioRing } from './AudioRing'
 import {
   IconAlert,
+  IconChat,
   IconExternal,
   IconFullscreen,
   IconHeadphones,
@@ -41,8 +42,10 @@ export interface PlayerPaneProps {
   item: LiveItem
   volume: number
   muted: boolean
+  chatVisible: boolean
   onVolume: (v: number) => void
   onMuted: (m: boolean) => void
+  onChatVisible: (v: boolean) => void
 }
 
 export function PlayerPane(p: PlayerPaneProps) {
@@ -437,6 +440,21 @@ export function PlayerPane(p: PlayerPaneProps) {
       {st.toast && <div className="pane-toast">{st.toast}</div>}
       {st.recovering && st.phase === 'live' && <div className="pane-recovering">信号不稳定，重连中…</div>}
 
+      {/* 公屏弹幕聊天面板（数据源接入前先展示占位） */}
+      {p.chatVisible && (st.phase === 'live' || st.phase === 'ended') && (
+        <aside className="chat-panel">
+          <div className="chat-head">
+            <span>弹幕</span>
+            <button className="chat-close" onClick={() => p.onChatVisible(false)} title="关闭">
+              ×
+            </button>
+          </div>
+          <div className="chat-list">
+            <div className="chat-empty">暂无弹幕</div>
+          </div>
+        </aside>
+      )}
+
       {/* 进入中 */}
       {st.phase === 'entering' && (
         <div className="pane-center">
@@ -537,6 +555,13 @@ export function PlayerPane(p: PlayerPaneProps) {
               }}
             />
           </div>
+          <button
+            className={cx('ctl', p.chatVisible && 'ctl-on')}
+            onClick={() => p.onChatVisible(!p.chatVisible)}
+            title="公屏弹幕聊天"
+          >
+            <IconChat />
+          </button>
           <div className="ctl-spacer" />
           <div className="timer-anchor">
             <button

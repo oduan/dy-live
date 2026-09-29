@@ -71,7 +71,8 @@ export function registerIpc(ctx: IpcContext): void {
     const next: Settings = {
       refreshIntervalSec: clamp(Number(patch?.refreshIntervalSec ?? cur.refreshIntervalSec) || 300, 120, 1800),
       volume: clamp(Number(patch?.volume ?? cur.volume), 0, 1),
-      muted: typeof patch?.muted === 'boolean' ? patch.muted : cur.muted
+      muted: typeof patch?.muted === 'boolean' ? patch.muted : cur.muted,
+      chatVisible: typeof patch?.chatVisible === 'boolean' ? patch.chatVisible : cur.chatVisible
     }
     const intervalChanged = next.refreshIntervalSec !== cur.refreshIntervalSec
     ctx.store.patch({ settings: next })

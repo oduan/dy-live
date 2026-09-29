@@ -93,6 +93,8 @@ export interface Settings {
   refreshIntervalSec: number
   volume: number
   muted: boolean
+  /** 直播间公屏弹幕聊天面板开关 */
+  chatVisible: boolean
 }
 
 export interface AuthState {
