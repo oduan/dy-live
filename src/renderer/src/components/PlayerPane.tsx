@@ -442,7 +442,6 @@ export function PlayerPane(p: PlayerPaneProps) {
         <div className="pane-center">
           <div className="spinner" />
           <p>正在进入直播间…</p>
-          <p className="dim">{item.nickname} · 以游客身份加载</p>
         </div>
       )}
 
