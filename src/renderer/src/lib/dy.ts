@@ -10,7 +10,8 @@ import type {
   RoomEnterRef,
   RoomEnterResult,
   RoomStatusEvent,
-  Settings
+  Settings,
+  UpdateStateEvent
 } from '@shared/types'
 
 const dy = window.dy!
@@ -39,10 +40,14 @@ export const api = {
   winFullscreen: () => inv<IpcResult<boolean>>(IPC.WinFullscreen),
   openExternal: (url: string) => inv<IpcResult<boolean>>(IPC.OpenExternal, url),
 
+  updateGetState: () => inv<UpdateStateEvent | null>(IPC.UpdateGetState),
+  updateInstall: () => inv<IpcResult<boolean>>(IPC.UpdateInstall),
+
   onAuthChanged: (cb: (e: AuthChangedEvent) => void) => dy.on(IPC.EvAuthChanged, cb as (d: unknown) => void),
   onListAutoUpdated: (cb: (e: ListResult) => void) => dy.on(IPC.EvListAutoUpdated, cb as (d: unknown) => void),
   onNextRefresh: (cb: (e: { at: number }) => void) => dy.on(IPC.EvNextRefresh, cb as (d: unknown) => void),
   onRoomStatus: (cb: (e: RoomStatusEvent) => void) => dy.on(IPC.EvRoomStatus, cb as (d: unknown) => void),
   onNetBlocked: (cb: (e: NetBlockedEvent) => void) => dy.on(IPC.EvNetBlocked, cb as (d: unknown) => void),
-  onNetRecovered: (cb: () => void) => dy.on(IPC.EvNetRecovered, cb as () => void)
+  onNetRecovered: (cb: () => void) => dy.on(IPC.EvNetRecovered, cb as () => void),
+  onUpdateState: (cb: (e: UpdateStateEvent) => void) => dy.on(IPC.EvUpdateState, cb as (d: unknown) => void)
 }

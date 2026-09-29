@@ -105,6 +105,17 @@ export interface NetBlockedEvent {
   reason: string
 }
 
+/** 应用更新状态（主进程 → 渲染进程） */
+export interface UpdateStateEvent {
+  status: 'available' | 'downloading' | 'downloaded' | 'installing' | 'error'
+  /** 新版本号，如 "0.2.0" */
+  version?: string
+  /** 下载进度 0-100 */
+  percent?: number
+  /** status=error 时的说明 */
+  message?: string
+}
+
 /** IPC 返回的统一包装 */
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; message: string }
 

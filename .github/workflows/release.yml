@@ -55,7 +55,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: installer-windows
-          path: release/*.exe
+          # latest.yml / blockmap 供 electron-updater 自动更新使用
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
           if-no-files-found: error
 
       - name: 上传 macOS 安装包
@@ -63,7 +67,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: installer-macos
-          path: release/*.dmg
+          path: |
+            release/*.dmg
+            release/latest-mac.yml
           if-no-files-found: error
 
   release:

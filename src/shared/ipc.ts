@@ -17,6 +17,8 @@ export const IPC = {
   WinMaximize: 'win:maximize',
   WinFullscreen: 'win:fullscreen',
   OpenExternal: 'app:openExternal',
+  UpdateGetState: 'update:getState',
+  UpdateInstall: 'update:install',
 
   // 事件（主 → 渲染）
   EvAuthChanged: 'ev:authChanged',
@@ -24,7 +26,8 @@ export const IPC = {
   EvNextRefresh: 'ev:nextRefresh',
   EvRoomStatus: 'ev:roomStatus',
   EvNetBlocked: 'ev:netBlocked',
-  EvNetRecovered: 'ev:netRecovered'
+  EvNetRecovered: 'ev:netRecovered',
+  EvUpdateState: 'ev:updateState'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

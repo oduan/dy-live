@@ -9,6 +9,7 @@ import { DouyinApi } from './douyin/api'
 import { RequestQueue } from './douyin/queue'
 import { LiveListService } from './douyin/liveList'
 import { RoomWatcherService } from './douyin/roomWatcher'
+import { UpdateService } from './updater'
 import { log } from './util'
 
 // www 登录态接口：间隔 ≥3s + 抖动；guest 直播接口：间隔 ≥2s + 抖动（均为串行队列）
@@ -31,6 +32,7 @@ const liveList = new LiveListService({
   broadcast
 })
 const watcher = new RoomWatcherService({ api, broadcast })
+const updater = new UpdateService(broadcast)
 
 function handleAuthChange(loggedIn: boolean): void {
   broadcast(IPC.EvAuthChanged, {
@@ -82,8 +84,9 @@ if (!gotLock) {
     store.load()
     sessions.init(handleAuthChange)
     wireQueueBackoff()
-    registerIpc({ sessions, liveList, watcher, store, ensureProfileAsync })
+    registerIpc({ sessions, liveList, watcher, store, ensureProfileAsync, updater })
     liveList.start()
+    updater.start()
     mainWindow = createMainWindow()
     // 关闭主窗口即退出整个应用：隐藏的抖音页面窗口会导致 window-all-closed 永远不触发，
     // 若不显式退出，关窗后应用会带着隐藏页面驻留后台

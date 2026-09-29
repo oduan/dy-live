@@ -12,6 +12,12 @@ export interface IpcContext {
   watcher: RoomWatcherService
   store: StoreLike
   ensureProfileAsync: () => void
+  updater: UpdaterLike
+}
+
+interface UpdaterLike {
+  getState(): { status: string; version?: string; percent?: number; message?: string } | null
+  startDownload(): boolean
 }
 
 interface StoreLike {
@@ -94,4 +100,7 @@ export function registerIpc(ctx: IpcContext): void {
     }
     return ok(true)
   })
+
+  ipcMain.handle(IPC.UpdateGetState, () => ctx.updater.getState())
+  ipcMain.handle(IPC.UpdateInstall, () => ok(ctx.updater.startDownload()))
 }

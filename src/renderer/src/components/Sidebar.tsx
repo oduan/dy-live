@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { LiveItem, ProfileInfo, Settings } from '@shared/types'
 import { formatCount, formatRemaining } from '../lib/format'
 import { IconAlert, IconLive, IconLogo, IconLogout, IconRefresh, IconSettings, IconUsers } from './Icons'
+import { UpdateBadge } from './UpdateBadge'
 
 export interface SidebarProps {
   profile: ProfileInfo | null
@@ -79,6 +80,7 @@ export function Sidebar(p: SidebarProps) {
           </div>
         </div>
         <div className="head-actions">
+          <UpdateBadge />
           <button
             className={`icon-btn ${p.refreshing ? 'spin' : ''}`}
             title={p.refreshing ? '刷新中…' : '立即刷新（有间隔限制）'}

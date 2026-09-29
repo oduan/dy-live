@@ -268,6 +268,66 @@ img {
   position: relative;
 }
 
+/* 应用更新角标（侧栏头部，刷新按钮左侧） */
+.update-pill {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: rgba(254, 44, 85, 0.12);
+  border: 1px solid rgba(254, 44, 85, 0.38);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.update-pill:hover {
+  background: rgba(254, 44, 85, 0.24);
+}
+
+.update-pill:active {
+  transform: scale(0.97);
+}
+
+.update-pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(254, 44, 85, 0.18);
+}
+
+.update-pill.busy {
+  cursor: default;
+  color: var(--text-dim);
+  background: var(--bg-3);
+  border-color: transparent;
+}
+
+.update-pill.busy .dot {
+  background: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(37, 244, 238, 0.15);
+}
+
+.update-pill .dot.pulse {
+  animation: update-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes update-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
 .menu-mask {
   position: fixed;
   inset: 0;

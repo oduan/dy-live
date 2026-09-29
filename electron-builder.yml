@@ -1,5 +1,10 @@
 appId: io.github.oduan.dy-live
 productName: dy-live
+# 自动更新源：electron-updater 据此检查 GitHub Releases 上的 latest.yml
+publish:
+  provider: github
+  owner: oduan
+  repo: dy-live
 directories:
   output: release
 files:
