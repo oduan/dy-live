@@ -15,12 +15,16 @@ import {
   IconPause,
   IconPlay,
   IconRefresh,
+  IconTimer,
   IconUsers,
   IconVideo,
   IconVolume
 } from './Icons'
 
 type Phase = 'entering' | 'live' | 'ended' | 'error' | 'unsupported'
+
+/** 定时暂停的可选时长（分钟） */
+const TIMER_OPTIONS = [15, 30, 60, 90]
 
 interface PaneState {
   phase: Phase
@@ -50,6 +54,9 @@ export function PlayerPane(p: PlayerPaneProps) {
   const [uiVisible, setUiVisible] = useState(true)
   const [reloadKey, setReloadKey] = useState(0)
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
+  const [sleepAt, setSleepAt] = useState(0)
+  const [sleepLeft, setSleepLeft] = useState(0)
+  const [timerOpen, setTimerOpen] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const paneRef = useRef<HTMLDivElement>(null)
@@ -84,6 +91,35 @@ export function PlayerPane(p: PlayerPaneProps) {
     phaseRef.current = 'ended'
     setSt((s) => ({ ...s, phase: 'ended', paused: true }))
   }, [])
+
+  // ---------- 定时暂停：倒计时结束即暂停播放（等同按下暂停键） ----------
+  useEffect(() => {
+    if (!sleepAt) {
+      setSleepLeft(0)
+      return
+    }
+    const tick = (): void => {
+      const left = sleepAt - Date.now()
+      if (left > 0) {
+        setSleepLeft(left)
+        return
+      }
+      setSleepAt(0)
+      if (phaseRef.current === 'live') {
+        const v = videoRef.current
+        if (v) {
+          try {
+            v.pause()
+          } catch {}
+        }
+        setSt((s) => ({ ...s, paused: true }))
+        toast('定时时间到，已暂停播放')
+      }
+    }
+    tick()
+    const t = window.setInterval(tick, 500)
+    return () => window.clearInterval(t)
+  }, [sleepAt, toast])
 
   // ---------- 进入直播间 ----------
   useEffect(() => {
@@ -503,6 +539,55 @@ export function PlayerPane(p: PlayerPaneProps) {
             />
           </div>
           <div className="ctl-spacer" />
+          <div className="timer-anchor">
+            <button
+              className={cx('ctl', sleepAt > 0 && 'ctl-timer-on')}
+              onClick={() => setTimerOpen((v) => !v)}
+              title={sleepAt > 0 ? `定时暂停：剩余 ${Math.ceil(sleepLeft / 60000)} 分钟` : '定时暂停'}
+            >
+              {sleepAt > 0 ? (
+                <span className="timer-count">
+                  {Math.floor(sleepLeft / 60000)}:{String(Math.floor((sleepLeft % 60000) / 1000)).padStart(2, '0')}
+                </span>
+              ) : (
+                <IconTimer />
+              )}
+            </button>
+            {timerOpen && (
+              <>
+                <div className="menu-mask" onClick={() => setTimerOpen(false)} />
+                <div className="timer-menu">
+                  <div className="menu-title">定时暂停 · 时间到自动暂停播放</div>
+                  <div className="interval-row">
+                    {TIMER_OPTIONS.map((m) => (
+                      <button
+                        key={m}
+                        className={`interval-opt ${sleepAt > 0 && Math.ceil(sleepLeft / 60000) === m ? 'active' : ''}`}
+                        onClick={() => {
+                          setSleepAt(Date.now() + m * 60_000)
+                          setSleepLeft(m * 60_000)
+                          setTimerOpen(false)
+                        }}
+                      >
+                        {m} 分钟
+                      </button>
+                    ))}
+                  </div>
+                  {sleepAt > 0 && (
+                    <button
+                      className="timer-cancel"
+                      onClick={() => {
+                        setSleepAt(0)
+                        setTimerOpen(false)
+                      }}
+                    >
+                      取消定时
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
           <button className="ctl" onClick={() => void api.openExternal(browserUrl)} title="在浏览器中打开">
             <IconExternal />
           </button>
