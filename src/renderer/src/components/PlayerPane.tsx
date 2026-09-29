@@ -8,7 +8,6 @@ import {
   IconExternal,
   IconFullscreen,
   IconHeadphones,
-  IconLive,
   IconLogo,
   IconMaximize,
   IconMute,
@@ -373,6 +372,7 @@ export function PlayerPane(p: PlayerPaneProps) {
   // 语音/电台房强制走音频界面：这类流的视频轨常为不可解码编码（如 H.265）或纯黑占位，
   // 仅靠 videoWidth===0 的运行时判定会漏（有轨但解不出画面 → 黑屏）
   const audioMode = st.audioOnly || info?.typeHint === 'voice' || info?.typeHint === 'audio'
+  const avatarUrl = info?.avatarUrl || item.avatarUrl
   const kindBadge = st.audioOnly
     ? { label: '音频直播', Icon: IconHeadphones }
       : info?.typeHint === 'voice'
@@ -416,9 +416,9 @@ export function PlayerPane(p: PlayerPaneProps) {
       {/* 顶部信息条 */}
       {(st.phase === 'live' || st.phase === 'ended') && (
         <header className="pane-top">
-          <span className="live-tag">
-            <IconLive size={6} /> {st.phase === 'ended' ? '已结束' : 'LIVE'}
-          </span>
+          <div className="pane-avatar" title={info?.nickname || item.nickname}>
+            {avatarUrl ? <img src={avatarUrl} alt="" referrerPolicy="no-referrer" /> : <IconLogo size={14} />}
+          </div>
           <span className="pane-nick">{info?.nickname || item.nickname}</span>
           <span className="pane-title">{info?.title || item.title}</span>
           {kindBadge && (
