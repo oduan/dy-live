@@ -27,6 +27,7 @@ export class LiveListService {
   private nextOffset = 0
   private updatedAt = 0
   private loading = false
+  private inflight: Promise<ListResult> | null = null
   private timer: ReturnType<typeof setTimeout> | undefined
   private nextAutoAt = 0
   private stopped = true
@@ -71,7 +72,8 @@ export class LiveListService {
 
   /** 首次加载：重置后拉取第一页 */
   async initial(): Promise<ListResult> {
-    this.reset()
+    // 启动预热已拉到数据（30s 内）：直接返回，避免重复排队
+    if (!this.loading && this.updatedAt > 0 && Date.now() - this.updatedAt < 30_000) return this.snapshot()
     return this.refresh(true)
   }
 
@@ -100,9 +102,11 @@ export class LiveListService {
 
   /** 刷新：覆盖已加载的页数（封顶 REFRESH_PAGE_CAP 页），manual=true 由用户触发 */
   async refresh(manual: boolean): Promise<ListResult> {
+    // 已有进行中的拉取：复用它，避免重复请求与结果竞态覆盖
+    if (this.loading && this.inflight) return this.inflight
     if (this.loading) return this.snapshot()
     this.loading = true
-    try {
+    const job = (async (): Promise<ListResult> => {
       const pages = Math.min(REFRESH_PAGE_CAP, Math.max(1, Math.ceil(this.items.length / LIST_PAGE_SIZE) || 1))
       let offset = 0
       const collected: LiveItem[] = []
@@ -125,9 +129,12 @@ export class LiveListService {
       this.persistCache()
       if (!manual) this.deps.broadcast(IPC.EvListAutoUpdated, this.snapshot())
       return this.snapshot()
-    } finally {
+    })()
+    this.inflight = job.finally(() => {
       this.loading = false
-    }
+      this.inflight = null
+    })
+    return this.inflight
   }
 
   snapshot(): ListResult {

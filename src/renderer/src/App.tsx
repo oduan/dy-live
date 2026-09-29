@@ -40,7 +40,6 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
   const [hasMore, setHasMore] = useState(false)
   const [total, setTotal] = useState(0)
   const [updatedAt, setUpdatedAt] = useState(0)
-  const [nextAutoAt, setNextAutoAt] = useState(0)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMsg, setErrorMsg] = useState('')
   const [loadingMore, setLoadingMore] = useState(false)
@@ -48,6 +47,8 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
   const [blocked, setBlocked] = useState<{ until: number; reason: string } | null>(null)
   const [selected, setSelected] = useState<LiveItem | null>(null)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
+  // 首次列表加载未完成前不进入"空态"（显示骨架而非"暂无正在直播"）
+  const [booted, setBooted] = useState(false)
   const manualAt = useRef(0)
   const settingsTimer = useRef<number | undefined>(undefined)
 
@@ -56,7 +57,6 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
     setHasMore(d.hasMore)
     setTotal(d.total)
     setUpdatedAt(d.updatedAt)
-    if (d.nextAutoAt) setNextAutoAt(d.nextAutoAt)
     setPhase('ready')
     setErrorMsg('')
   }, [])
@@ -65,6 +65,7 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
     setRefreshing(true)
     const r = await api.listLoad()
     setRefreshing(false)
+    setBooted(true)
     if (!r.ok) {
       setErrorMsg(r.message)
       setPhase((prev) => (prev === 'ready' ? 'ready' : 'error'))
@@ -86,7 +87,6 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
     void reload()
     const offs = [
       api.onListAutoUpdated(applyList),
-      api.onNextRefresh((e) => setNextAutoAt(e.at)),
       api.onNetBlocked((e) => setBlocked(e)),
       api.onNetRecovered(() => setBlocked(null))
     ]
@@ -134,8 +134,7 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
         hasMore={hasMore}
         total={total}
         updatedAt={updatedAt}
-        nextAutoAt={nextAutoAt}
-        phase={phase}
+        phase={!booted && phase === 'ready' && items.length === 0 ? 'loading' : phase}
         errorMsg={errorMsg}
         loadingMore={loadingMore}
         refreshing={refreshing}

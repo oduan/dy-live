@@ -40,12 +40,19 @@ function handleAuthChange(loggedIn: boolean): void {
     profile: loggedIn ? store.get().cache.profile ?? null : null
   })
   if (loggedIn) {
-    ensureProfileAsync()
+    // 启动预热：列表是首屏核心，先于用户信息入队，隐藏页就绪后立即拉取；
+    // 渲染层稍后的 listLoad 会复用这次进行中/刚完成的拉取，不重复排队
     liveList.reset()
+    void liveList.refresh(true).catch((e: unknown) => log('liveList', '预热拉取失败:', (e as Error)?.message))
+    ensureProfileAsync()
   }
 }
 
+let profileInflight = false
+
 function ensureProfileAsync(): void {
+  if (profileInflight) return
+  profileInflight = true
   api
     .fetchProfile()
     .then((p: ProfileInfo) => {
@@ -55,6 +62,9 @@ function ensureProfileAsync(): void {
       }
     })
     .catch((e: unknown) => log('auth', '拉取用户信息失败:', (e as Error)?.message))
+    .finally(() => {
+      profileInflight = false
+    })
 }
 
 function wireQueueBackoff(): void {

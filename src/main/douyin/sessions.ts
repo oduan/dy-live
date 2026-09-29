@@ -80,6 +80,7 @@ export class DouyinSessions {
   private wwwWin: BrowserWindow | null = null
   private guestWin: BrowserWindow | null = null
   private wwwReady = false
+  private wwwSignReady = false
   private guestReady = false
   private wwwPromise: Promise<WebContents> | null = null
   private guestPromise: Promise<WebContents> | null = null
@@ -160,20 +161,23 @@ export class DouyinSessions {
 
   // ---------- 隐藏 www 页（登录态，签名接口） ----------
 
-  async ensureWww(): Promise<WebContents> {
-    if (this.wwwWin && !this.wwwWin.isDestroyed() && this.wwwReady) return this.wwwWin.webContents
-    this.wwwPromise ||= this.createHiddenPage('www', 'persist:douyin', 'https://www.douyin.com/')
-      .then((wc) => {
-        // 尽力等待页面签名函数就绪（不在则降级为无签名请求，由上层错误提示兜底）
-        return withTimeout(this.waitSignFn(wc), 9000, 'sign-timeout').catch(() => wc)
-      })
-      .then((wc) => {
-        this.wwwReady = true
-        return wc
-      })
-      .finally(() => {
-        this.wwwPromise = null
-      })
+  async ensureWww(needSign = true): Promise<WebContents> {
+    const wc = await this.ensureWwwPage()
+    // 免签接口（如关注直播 feed）不必等签名函数：隐藏页加载完即可发请求
+    if (needSign && !this.wwwSignReady) {
+      // 尽力等待页面签名函数就绪（超时则降级为无签名请求，由上层错误提示兜底）
+      await withTimeout(this.waitSignFn(wc), 9000, 'sign-timeout').catch(() => undefined)
+      this.wwwSignReady = true
+    }
+    return wc
+  }
+
+  private ensureWwwPage(): Promise<WebContents> {
+    if (this.wwwWin && !this.wwwWin.isDestroyed() && this.wwwReady) return Promise.resolve(this.wwwWin.webContents)
+    this.wwwPromise ||= this.createHiddenPage('www', 'persist:douyin', 'https://www.douyin.com/').then((wc) => {
+      this.wwwReady = true
+      return wc
+    })
     return this.wwwPromise
   }
 
@@ -190,6 +194,7 @@ export class DouyinSessions {
   async reloadWww(): Promise<void> {
     if (this.wwwWin && !this.wwwWin.isDestroyed()) {
       this.wwwReady = false
+      this.wwwSignReady = false
       try {
         this.wwwWin.destroy()
       } catch {}

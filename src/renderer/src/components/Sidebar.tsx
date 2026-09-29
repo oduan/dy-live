@@ -10,7 +10,6 @@ export interface SidebarProps {
   hasMore: boolean
   total: number
   updatedAt: number
-  nextAutoAt: number
   phase: 'loading' | 'ready' | 'error'
   errorMsg: string
   loadingMore: boolean
@@ -61,8 +60,6 @@ export function Sidebar(p: SidebarProps) {
       }
     }
   }
-
-  const intervalLabel = INTERVAL_OPTIONS.find((o) => o.value === p.settings.refreshIntervalSec)?.label ?? `${Math.round(p.settings.refreshIntervalSec / 60)} 分钟`
 
   return (
     <aside className="sidebar">
@@ -134,16 +131,10 @@ export function Sidebar(p: SidebarProps) {
         <span className="live-count">
           <IconLive size={7} /> 正在直播 {p.total > 0 ? p.total : p.items.length}
         </span>
-        {p.blockedUntil > now ? (
+        {p.blockedUntil > now && (
           <span className="auto-next warn" title={p.blockedReason}>
             请求受限 {formatRemaining(p.blockedUntil - now)}
           </span>
-        ) : (
-          p.phase === 'ready' && (
-            <span className="auto-next">
-              自动刷新 {intervalLabel} · {formatRemaining((p.nextAutoAt || 0) - now)}
-            </span>
-          )
         )}
       </div>
 

@@ -48,7 +48,7 @@ export class DouyinApi {
     }
     const url = `${WWW_ORIGIN}${path}?${qs.toString()}`
     const res = await this.wwwQueue.run(async () => {
-      const wc = await this.sessions.ensureWww()
+      const wc = await this.sessions.ensureWww(sign)
       return this.sessions.pageFetch(wc, url, sign)
     })
     if (!res.ok || !res.body) {
