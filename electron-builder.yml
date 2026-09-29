@@ -1,0 +1,23 @@
+appId: io.github.oduan.dy-live
+productName: dy-live
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+  - "!**/*.map"
+win:
+  target:
+    - nsis
+  arch:
+    - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+mac:
+  target:
+    - dmg
+  category: public.app-category.entertainment
+  artifactName: ${productName}-${version}-${arch}.${ext}
+# 如需自定义图标：放置 build/icon.ico（Windows）与 build/icon.icns（macOS）
