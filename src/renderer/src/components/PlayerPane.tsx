@@ -230,6 +230,8 @@ export function PlayerPane(p: PlayerPaneProps) {
       player.attach(v)
       v.volume = p.volume
       v.muted = p.muted
+      // FLV 源旁路解析 SEI 布局（PK/连麦精确取景）；HLS 等无旁路时走像素兜底
+      if (c.kind === 'flv') cropRef.current?.tapStream(c.url)
       player.load(c.url, c.kind)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -264,11 +266,12 @@ export function PlayerPane(p: PlayerPaneProps) {
       }
     }
     void audioGraphRef.current?.resume().catch(() => {})
-    startPlaybackRef.current(0)
-    // PK/连麦智能取景：跟随本轮直播会话创建，切房/重连时销毁重建
+    // PK/连麦智能取景：跟随本轮直播会话创建，切房/重连时销毁重建。
+    // 需先于 startPlayback 创建——startPlayback 会对 FLV 源安装 SEI 旁路
     cropRef.current?.destroy()
     cropRef.current = new ContentCropper()
     if (videoRef.current) cropRef.current.attach(videoRef.current)
+    startPlaybackRef.current(0)
     return () => {
       cropRef.current?.destroy()
       cropRef.current = null

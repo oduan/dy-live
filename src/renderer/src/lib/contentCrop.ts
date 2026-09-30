@@ -1,9 +1,17 @@
 /**
  * PK/连麦智能取景：主播打 PK 时流仍是竖屏分辨率，但下游合成器把 2/3/4 人
- * 的横条画面居中放在竖屏流里，上下留大片纯色灰边。这里定期抽帧检测有效
- * 内容区，把内容区 contain 放大居中到播放器可视区；PK 结束画面恢复全幅后
- * 自动还原。检测不到明确留边时不动画面（不影响正常竖屏/横屏直播）。
+ * 的横条画面居中放在竖屏流里，上下留大片纯色灰边。
+ *
+ * 两级策略：
+ * 1. SEI 精确布局（优先）：FLV 旁路解析 payload_type=100 的业务 SEI，直接拿到
+ *    各参与者的归一化矩形（见 flvSei.ts），精确、即时、无误判；
+ * 2. 像素检测兜底：无 SEI（HLS 源/非 H.264/SEI 失效）时定期抽帧检测有效内容区。
+ *
+ * 把内容区 contain 放大居中到播放器可视区；PK 结束画面恢复全幅后自动还原。
+ * 检测不到明确留边时不动画面（不影响正常竖屏/横屏直播）。
  */
+
+import { FlvSeiTap, SeiLayout, tapFlvSei } from './flvSei'
 
 interface Rect {
   x: number
@@ -27,6 +35,8 @@ const CONFIRM_COUNT = 2
 const CHECK_INTERVAL = 2000
 /** 两次候选视为一致的偏差容限（归一化） */
 const TOLERANCE = 0.02
+/** SEI 布局的新鲜期：期内直接采用，超时回退像素检测 */
+const SEI_FRESH_MS = 15_000
 
 const closeTo = (a: Rect | null, b: Rect | null): boolean => {
   if (!a || !b) return a === b
@@ -47,6 +57,10 @@ export class ContentCropper {
   private candidateHits = 0
   /** 当前已应用到 transform 的内容区；null 表示全幅原始状态 */
   private applied: Rect | null = null
+  /** SEI 给出的内容带（新鲜期内权威）；seAt 用于过期回退像素检测 */
+  private seiRect: Rect | null = null
+  private seiAt = 0
+  private tap: FlvSeiTap | null = null
   /** 画布被跨域污染等不可恢复错误，之后不再尝试 */
   private broken = false
 
@@ -65,6 +79,8 @@ export class ContentCropper {
   destroy(): void {
     window.clearInterval(this.timer)
     window.clearTimeout(this.debounce)
+    this.tap?.dispose()
+    this.tap = null
     if (this.video) {
       this.video.removeEventListener('loadedmetadata', this.onMaybe)
       this.video.removeEventListener('playing', this.onMaybe)
@@ -77,11 +93,33 @@ export class ContentCropper {
     this.candidate = null
     this.candidateHits = 0
     this.applied = null
+    this.seiRect = null
   }
 
   private onMaybe = (): void => {
     window.clearTimeout(this.debounce)
     this.debounce = window.setTimeout(this.check, 400)
+  }
+
+  /** 接管 FLV 拉流响应，旁路解析 SEI 布局（仅 flv 源调用；必须在 player.load 之前） */
+  tapStream(url: string): void {
+    this.tap?.dispose()
+    this.tap = tapFlvSei(url, (l) => this.onSeiLayout(l))
+  }
+
+  /** SEI 布局到达：刷新新鲜度；内容带变化且画布与视频一致时立即应用 */
+  private onSeiLayout(l: SeiLayout): void {
+    this.seiAt = Date.now()
+    const v = this.video
+    if (!v || !v.videoWidth || !v.videoHeight || !l.canvasW || !l.canvasH) return
+    // SEI 矩形基于合成画布；画布与视频帧纵横比不一致时不可信（横屏直播等），弃用
+    const va = v.videoWidth / v.videoHeight
+    const ca = l.canvasW / l.canvasH
+    if (Math.abs(va - ca) / ca > 0.02) return
+    const rect: Rect = { x: l.bounds.x, y: l.bounds.y, w: l.bounds.w, h: l.bounds.h }
+    if (closeTo(rect, this.seiRect)) return
+    this.seiRect = rect
+    this.check()
   }
 
   private check = (): void => {
@@ -97,6 +135,17 @@ export class ContentCropper {
       }
       return
     }
+
+    // SEI 精确布局优先：新鲜期内直接采用，无需像素采样与二次确认
+    if (this.seiRect && Date.now() - this.seiAt < SEI_FRESH_MS) {
+      const target = this.decide(this.seiRect)
+      if (!closeTo(target, this.applied)) {
+        this.applied = target
+        this.applyTransform(target)
+      }
+      return
+    }
+    this.seiRect = null
 
     const rect = this.sample()
     if (closeTo(rect, this.candidate)) this.candidateHits++
