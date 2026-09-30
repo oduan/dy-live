@@ -1,17 +1,20 @@
 /**
- * 公屏弹幕（自建 WS 客户端，签名/游标借页面侧捕获）。
- * 直连 douyin IM 推送服务（webcast100-ws-web-lf.douyin.com，路径 /webcast/im/push/v2/）：
- * - 签名参数 signature 借隐藏 guest 页里的 byted_acrawler.frontierSign 计算
- * - 帧为 protobuf（proto-lite 手工解码），payload 标 'pb' 实为 gzip，按魔数判断解压
- * - 每 10s 心跳；30s 无数据主动断开重连；断线指数退避，全程以系统弹幕同步状态
- * 字段号参照公开的 douyin webcast proto（PushFrame/Response/ChatMessage/User/GiftMessage），
+ * 公屏弹幕。
+ * 主路径：HTTP 长轮询（webcast/im/fetch，fetch_rule=1 握手 + 2 增量，~1.2s/次）——
+ *   与官方页面同款传输，无签名要求，研究实测稳定投递全部消息类型；
+ *   请求借常驻 guest 页发出（完整 Cookie 环境），全程不导航房间页。
+ * 兜底：握手失败时回退 WSS（webcast100-ws-web-{lf,hl}.douyin.com /webcast/im/push/v2/），
+ *   signature = frontierSign({X-MS-STUB: md5("")}) 的 X-Bogus；
+ *   再兜底借页面进房捕获连接参数。协议细节见 research/douyin-live-protocol.md。
+ * 帧为 protobuf（proto-lite 手工解码）；长轮询响应无 gzip 外壳，WSS payload 标 'pb' 实为 gzip。
+ * 字段号参照公开的 douyin webcast proto（Response/ChatMessage/User/GiftMessage），
  * 协议漂移时优先核对本文件与 proto-lite.ts。
  */
 import WebSocket from 'ws'
 import { gunzipSync } from 'node:zlib'
 import { IPC } from '@shared/ipc'
 import type { ChatItem, ChatEvent } from '@shared/types'
-import { decodeFields, encodeBytesField, fint, fstr } from './proto-lite'
+import { decodeFields, encodeBytesField, fint, fstr, type ProtoField } from './proto-lite'
 import { log } from '../util'
 import type { DouyinSessions } from './sessions'
 
@@ -23,6 +26,10 @@ const LIVENESS_CHECK_MS = 10_000
 const MAX_RECONNECT = 10
 const FLUSH_MS = 400
 const DEDUP_WINDOW_MS = 3_000
+/** 长轮询间隔：与官方页面一致（响应里的 fetch_interval 实测为 1000ms） */
+const POLL_INTERVAL_MS = 1_200
+/** 连续轮询失败次数达到该值后重新握手（fetch_rule=1） */
+const POLL_ERRORS_BEFORE_REHANDSHAKE = 3
 
 export interface ChatServiceDeps {
   sessions: DouyinSessions
@@ -53,6 +60,18 @@ export class ChatService {
   private webid = ''
   private gotMsg = false
   private lastFrameAt = 0
+  /** 本次会话内是否成功建连过（用于失败升级判断） */
+  private everOpened = false
+  /** 页面捕获模式：自建路径连续失败后升级，本次会话内不再回退自建 */
+  private captureMode = false
+  /** 调试计数：本次连接收到的帧数（DY_CHAT_DEBUG=1 时输出前 8 帧详情） */
+  private frameCount = 0
+  /** 服务端在 im/fetch 握手里指派的 WSS 端点（字段 10/14），缺省用 WS_BASE */
+  private pushServer = ''
+  // ---------- 长轮询传输 ----------
+  private pollTimer: NodeJS.Timeout | undefined
+  private polling = false
+  private pollErrors = 0
 
   constructor(private deps: ChatServiceDeps) {}
 
@@ -63,16 +82,25 @@ export class ChatService {
     this.webRid = ref.webRid ?? ''
     this.attempts = 0
     this.gotMsg = false
+    this.everOpened = false
+    this.captureMode = false
+    this.pushServer = ''
+    this.frameCount = 0
+    this.polling = false
+    this.pollErrors = 0
     this.cursor = ''
     this.internalExt = ''
     this.buffer = []
     this.seenKeys = new Map()
     this.sys('正在连接弹幕…')
-    void this.connect()
+    void this.startPolling()
   }
 
   stop(): void {
     this.stopped = true
+    this.polling = false
+    clearTimeout(this.pollTimer)
+    this.pollTimer = undefined
     clearInterval(this.hbTimer)
     clearInterval(this.livenessTimer)
     clearTimeout(this.flushTimer)
@@ -109,9 +137,9 @@ export class ChatService {
     const ttwid = await ses.getGuestCookie('ttwid')
     if (!ttwid) log('chat', '警告：guest 会话无 ttwid Cookie')
     if (!this.webid) {
-      this.webid =
-        (await ses.getGuestCookie('webid')) ||
-        String(1_000_000_000_000_000_000n + BigInt(Math.floor(Math.random() * 8_999_999_999_999_999_999)))
+      // 必须用与 guest 会话配套的真实设备 ID（Tea SDK 缓存）；随机数会被服务端静默拒绝路由
+      this.webid = (await ses.getGuestWebId()) || String(1_000_000_000_000_000_000n + BigInt(Math.floor(Math.random() * 8_999_999_999_999_999_999)))
+      log('chat', '弹幕设备 ID:', this.webid)
     }
     const params: Record<string, string> = {
       app_name: 'douyin_web',
@@ -119,20 +147,6 @@ export class ChatService {
       webcast_sdk_version: '1.0.15',
       update_version_code: '1.0.15',
       compress: 'gzip',
-      device_platform: 'web',
-      cookie_enabled: 'true',
-      screen_width: '1920',
-      screen_height: '1080',
-      browser_language: 'zh-CN',
-      browser_platform: 'Win32',
-      browser_name: 'Mozilla',
-      browser_version:
-        '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
-      browser_online: 'true',
-      tz_name: 'Asia/Shanghai',
-      cursor: this.cursor || `t-${Date.now()}`,
-      internal_ext: this.internalExt,
-      host: 'https://live.douyin.com',
       aid: '6383',
       live_id: '1',
       did_rule: '3',
@@ -145,33 +159,215 @@ export class ChatService {
       insert_task_id: '',
       live_reason: '',
       room_id: this.roomId,
-      heartbeatDuration: '0'
+      heartbeatDuration: '0',
+      cursor: this.cursor || `t-${Date.now()}`,
+      internal_ext: this.internalExt,
+      host: 'https://live.douyin.com',
+      device_platform: 'web',
+      cookie_enabled: 'true',
+      screen_width: '1920',
+      screen_height: '1080',
+      browser_language: 'zh-CN',
+      browser_platform: 'Win32',
+      browser_name: 'Mozilla',
+      browser_version:
+        '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+      browser_online: 'true',
+      tz_name: 'Asia/Shanghai',
     }
-    const qs = new URLSearchParams(params).toString()
-    // 对最终查询串原样计算 frontierSign（取其 X-Bogus），与页面行为一致；真实 URL 中 signature 不做 URL 编码
-    const signature = await ses.frontierSign(qs)
+    // 官方 IM SDK 的序列化器是裸拼接（k=v&k2=v2，不做 URL 编码），保持一致
+    let qs = ''
+    for (const [k, v] of Object.entries(params)) qs += (qs ? '&' : '') + k + '=' + (v ?? '')
+    // 签名输入为 { X-MS-STUB: md5("") }（websocket_key 白名单为空），见 sessions.frontierSign
+    const signature = await ses.frontierSign()
     if (!signature) log('chat', '警告：签名为空，连接大概率被拒')
-    return `${WS_BASE}?${qs}&signature=${signature}`
+    const base = this.pushServer || WS_BASE
+    return `${base}?${qs}&signature=${signature}`
+  }
+
+  /**
+   * 借页面进房捕获自建 WS 连接参数（导航房间页约 7s，仅在缺 room_id 或自建路径失败时使用）。
+   * 捕获的 URL 由页面 SDK 生成（含页面侧签名与游标），roomId 允许从 URL 反解。
+   */
+  private async captureUrl(): Promise<string> {
+    if (!this.webRid) return ''
+    const url = await this.deps.sessions.captureRoomWSUrl(this.webRid, this.roomId)
+    if (!url) return ''
+    log('chat', '已借页面捕获弹幕连接参数')
+    const m = /([?&])room_id=(\d+)/.exec(url)
+    if (!this.roomId && m) {
+      this.roomId = m[2]
+      log('chat', '从捕获 URL 解析 room_id:', this.roomId)
+    }
+    return url
+  }
+
+  /** im/fetch 请求 URL（fetch_rule=1 初始握手 / 2 增量续传；响应为 protobuf，无签名要求） */
+  private imFetchUrl(fetchRule: 1 | 2): string {
+    const params = new URLSearchParams({
+      resp_content_type: 'protobuf',
+      did_rule: '3',
+      device_id: '',
+      app_name: 'douyin_web',
+      endpoint: 'live_pc',
+      support_wrds: '1',
+      user_unique_id: this.webid,
+      identity: 'audience',
+      need_persist_msg_count: '15',
+      insert_task_id: '',
+      live_reason: '',
+      room_id: this.roomId,
+      version_code: '180800',
+      last_rtt: fetchRule === 1 ? '0' : '1100',
+      live_id: '1',
+      aid: '6383',
+      fetch_rule: String(fetchRule),
+      cursor: fetchRule === 1 ? '' : this.cursor,
+      internal_ext: fetchRule === 1 ? '' : this.internalExt,
+      device_platform: 'web',
+      cookie_enabled: 'true',
+      screen_width: '1920',
+      screen_height: '1080',
+      browser_language: 'zh-CN',
+      browser_platform: 'Win32',
+      browser_name: 'Mozilla',
+      browser_version:
+        '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+      browser_online: 'true',
+      tz_name: 'Asia/Shanghai'
+    })
+    return `https://live.douyin.com/webcast/im/fetch/?${params.toString()}`
+  }
+
+  /**
+   * WSS 会话握手：借 guest 页做一次 im/fetch（fetch_rule=1），取服务端签发的
+   * cursor/internal_ext（内含 wss_push_room_id/wss_push_did 绑定）与 push_server 端点。
+   * 跳过此握手直接建连：服务端接受连接但不路由房间消息（实测只回心跳）。
+   */
+  private async fetchImSession(): Promise<void> {
+    const ses = this.deps.sessions
+    const wc = await ses.ensureGuest()
+    const res = await ses.pageFetchBinary(wc, this.imFetchUrl(1))
+    if (res.status !== 200 || !res.body.length) {
+      throw new Error(`HTTP ${res.status} len=${res.body.length} ${res.err ?? ''}`)
+    }
+    const resp = decodeFields(res.body)
+    // Response{ messages=1, cursor=2, fetch_interval=3, now=4, internal_ext=5, push_server=10/14 }
+    const cursor = fstr(resp.get(2)?.[0])
+    const ext = fstr(resp.get(5)?.[0])
+    const push = fstr(resp.get(10)?.[0]) || fstr(resp.get(14)?.[0])
+    if (cursor) this.cursor = cursor
+    if (ext) this.internalExt = ext
+    if (/^wss:\/\//.test(push)) this.pushServer = push
+    log('chat', `im/fetch 握手完成 cursor=${(cursor || '(空)').slice(0, 48)} ext=${ext ? '有' : '无'} push=${push || '(默认)'}`)
+  }
+
+  // ---------- 长轮询传输（主路径，与官方页面同款） ----------
+
+  /**
+   * 长轮询主路径：借 guest 页每 ~1.2s 拉一次增量消息。
+   * 研究实测该通道无签名要求、稳定投递全部消息类型（WSS 直连在本环境被服务端静默不路由）。
+   */
+  private async startPolling(): Promise<void> {
+    this.polling = true
+    try {
+      await this.fetchImSession()
+    } catch (e) {
+      log('chat', '长轮询握手失败，回退 WebSocket:', (e as Error)?.message)
+      this.polling = false
+      return this.connect()
+    }
+    this.attempts = 0
+    this.pollErrors = 0
+    this.sys('弹幕连接已建立')
+    void this.pollOnce()
+  }
+
+  private async pollOnce(): Promise<void> {
+    if (this.stopped || !this.polling) return
+    const t0 = Date.now()
+    try {
+      const ses = this.deps.sessions
+      const wc = await ses.ensureGuest()
+      const res = await ses.pageFetchBinary(wc, this.imFetchUrl(2))
+      if (res.status !== 200 || !res.body.length) {
+        throw new Error(`HTTP ${res.status} len=${res.body.length}`)
+      }
+      this.handleImResponse(res.body)
+      this.pollErrors = 0
+    } catch (e) {
+      if (this.stopped || !this.polling) return
+      this.pollErrors++
+      log('chat', `轮询失败（第 ${this.pollErrors} 次）:`, (e as Error)?.message)
+      if (this.pollErrors >= POLL_ERRORS_BEFORE_REHANDSHAKE) {
+        try {
+          this.cursor = ''
+          this.internalExt = ''
+          await this.fetchImSession()
+          this.pollErrors = 0
+          this.sys('弹幕连接已恢复')
+        } catch (e2) {
+          log('chat', '重新握手失败:', (e2 as Error)?.message)
+        }
+      }
+    }
+    const wait = Math.max(300, POLL_INTERVAL_MS - (Date.now() - t0))
+    this.pollTimer = setTimeout(() => void this.pollOnce(), wait)
+  }
+
+  /** 解析 im/fetch 响应（protobuf Response，无 PushFrame/gzip 外壳）并分发 */
+  private handleImResponse(buf: Buffer): void {
+    const resp = decodeFields(buf)
+    const cursor = fstr(resp.get(2)?.[0])
+    if (cursor) this.cursor = cursor
+    const ext = fstr(resp.get(5)?.[0])
+    if (ext) this.internalExt = ext
+    this.dispatchMessages(resp)
+  }
+
+  /** 遍历 Response.messages 并分发（长轮询与 WSS 帧共用） */
+  private dispatchMessages(resp: Map<number, ProtoField[]>): void {
+    for (const m of resp.get(1) ?? []) {
+      const msg = decodeFields(m.bytes)
+      const method = fstr(msg.get(1)?.[0])
+      const mp = msg.get(2)?.[0]?.bytes
+      if (!method || !mp) continue
+      if (method === 'WebcastChatMessage') this.onChat(mp)
+      else if (method === 'WebcastGiftMessage') this.onGift(mp)
+      // 表情聊天：电台房的小心心等互动走此通道，显示为普通弹幕
+      else if (method === 'WebcastEmojiChatMessage') this.onEmojiChat(mp)
+    }
   }
 
   private async connect(): Promise<void> {
     try {
-      // 弹幕连接参数优先借页面侧捕获（含合法签名与游标）；自建 URL 仅作兜底
+      // 主路径：纯算法构造 URL（签名借常驻 guest 页计算，全程不导航房间页，切房/重连秒级）
       let url = ''
-      if (this.webRid) {
-        url = await this.deps.sessions.captureRoomWSUrl(this.webRid, this.roomId)
-        if (url) {
-          log('chat', '已获取页面侧弹幕连接参数')
-          // roomId 允许缺省（如热门房间仅知道 webRid）：从捕获 URL 里取真实 room_id
-          const m = /([?&])room_id=(\d+)/.exec(url)
-          if (!this.roomId && m) {
-            this.roomId = m[2]
-            log('chat', '从捕获 URL 解析 room_id:', this.roomId)
+      let captureTried = false
+      if (this.captureMode) {
+        captureTried = true
+        url = await this.captureUrl()
+      }
+      if (!url && this.roomId) {
+        // WSS 会话绑定在 im/fetch 握手上：先取服务端签发的 cursor/internal_ext 再建连
+        if (!this.cursor) {
+          try {
+            await this.fetchImSession()
+          } catch (e) {
+            log('chat', 'im/fetch 握手失败，降级直连:', (e as Error)?.message)
           }
         }
+        url = await this.buildUrl()
+        if (url) log('chat', '使用自建弹幕连接参数')
+      }
+      // 兜底1：仅知 webRid 缺 room_id（热门房间）→ 借页面进房一次，顺带解析真实 room_id
+      if (!url && this.webRid && !captureTried) {
+        url = await this.captureUrl()
+        // 捕获只是为了补 room_id：拿到后回到自建模式，重连不再导航页面
+        if (url && this.roomId) this.captureMode = false
       }
       if (!url) {
-        log('chat', '未捕获到页面连接参数，尝试自建 URL')
+        log('chat', '连接参数缺失，最后尝试自建 URL')
         url = await this.buildUrl()
       }
       // WS 升级请求必须带浏览器同款头：Cookie(ttwid 等) 缺失会被风控拒（回 200 而非 101）
@@ -188,6 +384,8 @@ export class ChatService {
       ws.on('open', () => {
         log('chat', '弹幕服务已连接', this.roomId)
         this.attempts = 0
+        this.everOpened = true
+        this.frameCount = 0
         this.lastFrameAt = Date.now()
         this.sys('弹幕连接已建立')
         clearInterval(this.hbTimer)
@@ -229,6 +427,12 @@ export class ChatService {
     clearInterval(this.hbTimer)
     clearInterval(this.livenessTimer)
     this.attempts++
+    // 自建路径连续失败且从未建连成功 → 升级为页面捕获模式（本次会话内保持）
+    if (!this.everOpened && !this.captureMode && this.attempts >= 2 && this.webRid) {
+      this.captureMode = true
+      log('chat', '自建连接连续失败，切换为页面捕获模式')
+      this.sys('自建连接受阻，切换页面捕获模式…')
+    }
     if (this.attempts > MAX_RECONNECT) {
       this.sys('弹幕连接已断开，重新打开弹幕开关可重试')
       log('chat', `重连 ${MAX_RECONNECT} 次失败，放弃（${reason}）`)
@@ -277,6 +481,14 @@ export class ChatService {
     const frame = decodeFields(data)
     const payloadType = fstr(frame.get(7)?.[0]) // payload_type
     const payload = frame.get(8)?.[0]?.bytes
+    if (process.env.DY_CHAT_DEBUG) {
+      this.frameCount++
+      if (this.frameCount <= 3) {
+        log('chat', `[debug] 帧#${this.frameCount} hex=${data.toString('hex').slice(0, 180)}`)
+      } else if (this.frameCount <= 8) {
+        log('chat', `[debug] 帧#${this.frameCount} payload_type=${payloadType || '(空)'} payload=${payload?.length ?? 0}B`)
+      }
+    }
     if (!payload) return
     if (payloadType !== 'msg') return
 
@@ -291,20 +503,21 @@ export class ChatService {
       }
     }
     const resp = decodeFields(body)
+    // Response{ messages=1, cursor=2, fetch_interval=3, now=4, internal_ext=5, fetch_type=6, ... }
+    // （此前误读 6 为 internal_ext——6 实为 fetch_type；cursor 单独即可续传，5 为空不影响）
     const cursor = fstr(resp.get(2)?.[0])
     if (cursor) this.cursor = cursor
-    const ext = fstr(resp.get(6)?.[0])
+    const ext = fstr(resp.get(5)?.[0])
     if (ext) this.internalExt = ext
-    for (const m of resp.get(1) ?? []) {
-      const msg = decodeFields(m.bytes)
-      const method = fstr(msg.get(1)?.[0])
-      const mp = msg.get(2)?.[0]?.bytes
-      if (!mp) continue
-      if (method === 'WebcastChatMessage') this.onChat(mp)
-      else if (method === 'WebcastGiftMessage') this.onGift(mp)
-      // 表情聊天：电台房的小心心等互动走此通道，显示为普通弹幕
-      else if (method === 'WebcastEmojiChatMessage') this.onEmojiChat(mp)
+    const messages = resp.get(1) ?? []
+    if (process.env.DY_CHAT_DEBUG && this.frameCount <= 8) {
+      const methods = messages
+        .map((m) => fstr(decodeFields(m.bytes).get(1)?.[0]))
+        .filter(Boolean)
+        .slice(0, 6)
+      log('chat', `[debug] 帧#${this.frameCount} 解出 ${messages.length} 条: ${methods.join(', ') || '(空)'}`)
     }
+    this.dispatchMessages(resp)
   }
 
   /** 去重：msg_id 优先；缺失时按 类型+昵称+内容 在短窗口内去重（多路由重复投递都在同一秒内） */
@@ -346,58 +559,53 @@ export class ChatService {
   }
 
   /**
-   * 礼物弹幕。GiftMessage{ common=1, gift_id=2, repeat_count=5, user=7, gift=16 }；
+   * 礼物弹幕。GiftMessage{ common=1, gift_id=2, repeat_count=5(公开 proto 记 3，实测 5 有值), user=7, gift=16 }。
    * 礼物名在 GiftStruct 内，字段号未完全确认：取第一个短中文字符串字段兜底。
+   * 设置 DY_CHAT_DEBUG=1 可输出地毯式字段勘察（用于协议漂移时重新校准）。
    */
   private onGift(buf: Buffer): void {
-    // TEMP-DBG: 地毯式字段勘察
     const gm = decodeFields(buf)
-    log(
-      'chat',
-      `收到 GiftMessage (${buf.length}B) 字段: ${[...gm.keys()]
+    if (process.env.DY_CHAT_DEBUG) {
+      const brief = [...gm.keys()]
         .map((k) => {
           const f = gm.get(k)![0]
-          return `${k}:${f.wire === 2 ? f.bytes.length : 'v' + String(f.int).slice(0, 10)}`
+          return `${k}:${f.wire === 2 ? f.bytes.length + 'B' : String(f.int).slice(0, 10)}`
         })
-        .join(' ')}`
-    )
-    const user = gm.get(7)?.[0]
-    if (user) {
-      const u = decodeFields(user.bytes)
-      log('chat', `user(7): nick='${fstr(u.get(3)?.[0])}' 字段号:[${[...u.keys()].join(',')}]`)
-    } else {
-      log('chat', 'GiftMessage 无字段7(user)')
+        .join(' ')
+      log('chat', `[debug] GiftMessage (${buf.length}B) 字段: ${brief}`)
+      const user = gm.get(7)?.[0]
+      if (user) {
+        const u = decodeFields(user.bytes)
+        log('chat', `[debug] user(7): nick='${fstr(u.get(3)?.[0])}' 字段号:[${[...u.keys()].join(',')}]`)
+      }
+      const gift = gm.get(16)?.[0]
+      if (gift) {
+        const gf = decodeFields(gift.bytes)
+        for (const [no, list] of gf) {
+          const f = list[0]
+          if (f && f.wire === 2) {
+            const s = f.bytes.toString('utf8')
+            if (/^[\x20-\x7e\u4e00-\u9fa5A-Za-z0-9]+$/.test(s) && s.length <= 30) {
+              log('chat', `[debug] gift.${no} = '${s}'`)
+            }
+          }
+        }
+      }
     }
+    const user = gm.get(7)?.[0]
+    if (!user) return
+    const u = decodeFields(user.bytes)
+    const nick = fstr(u.get(3)?.[0])
+    if (!nick) return
+    const count = fint(gm.get(5)?.[0]) || fint(gm.get(3)?.[0]) || 1
+    let name = ''
     const gift = gm.get(16)?.[0]
     if (gift) {
       const gf = decodeFields(gift.bytes)
-      log('chat', `gift(16): 字段号:[${[...gf.keys()].join(',')}]`)
       for (const [no, list] of gf) {
-        const f = list[0]
-        if (f && f.wire === 2) {
-          const s = f.bytes.toString('utf8')
-          if (/^[\x20-\x7e\u4e00-\u9fa5A-Za-z0-9]+$/.test(s) && s.length <= 30) log('chat', `  gift.${no} = '${s}'`)
-        }
-      }
-    } else {
-      log('chat', 'GiftMessage 无字段16(gift)')
-    }
-    log('chat', `repeat_count(字段5) = ${fint(gm.get(5)?.[0])}`)
-    const user2 = gm.get(7)?.[0]
-    if (!user2) return
-    const u2 = decodeFields(user2.bytes)
-    const nick = fstr(u2.get(3)?.[0])
-    if (!nick) return
-    const count = fint(gm.get(5)?.[0]) || 1
-    let name = ''
-    const gift2 = gm.get(16)?.[0]
-    if (gift2) {
-      const gf2 = decodeFields(gift2.bytes)
-      for (const [no, list] of gf2) {
         const f = list[0]
         if (!f || f.wire !== 2) continue
         const s = f.bytes.toString('utf8')
-        // 调试留痕：确认礼物名字段号后收紧此启发式
         if (!name && /^[\u4e00-\u9fa5A-Za-z0-9]{1,12}$/.test(s)) name = s
       }
     }

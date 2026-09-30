@@ -1,0 +1,10 @@
+# 研究产物：脚本与报告入库；抓包/凭据/大文件/第三方版权脚本不入库
+samples/
+*.bin
+*.html
+*.json
+*.log
+*.txt
+cookies.txt
+full_cookie.txt
+webmssdk.es5.js

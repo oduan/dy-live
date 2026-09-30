@@ -1,0 +1,61 @@
+// WS 握手头部对照实验：Node ws + 浏览器级升级头，判断被拒原因是头部还是 TLS 指纹
+import WebSocket from 'ws'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { loadWebmssdk } from './sign_node.mjs'
+
+const raw = readFileSync(process.env.DY_COOKIE_FILE || 'full_cookie.txt', 'utf8').trim()
+const UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
+const roomId = process.argv[2] || '7691093117956606739'
+
+const { byted_acrawler } = loadWebmssdk()
+const md5empty = createHash('md5').update('').digest('hex')
+const signature = byted_acrawler.frontierSign({ 'X-MS-STUB': md5empty })['X-Bogus']
+
+const params = {
+  app_name: 'douyin_web', version_code: '180800', webcast_sdk_version: '1.0.15', update_version_code: '1.0.15',
+  compress: 'gzip', aid: '6383', live_id: '1', did_rule: '3', endpoint: 'live_pc', support_wrds: '1',
+  user_unique_id: '7690425553774937654', im_path: '/webcast/im/fetch/', identity: 'audience',
+  need_persist_msg_count: '15', insert_task_id: '', live_reason: '', room_id: roomId, heartbeatDuration: '0',
+  cursor: `t-${Date.now()}`, internal_ext: '', host: 'https://live.douyin.com', device_platform: 'web',
+  cookie_enabled: 'true', screen_width: '1920', screen_height: '1080', browser_language: 'zh-CN',
+  browser_platform: 'Win32', browser_name: 'Mozilla',
+  browser_version:
+    '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+  browser_online: 'true', tz_name: 'Asia/Shanghai',
+}
+let qs = ''
+for (const [k, v] of Object.entries(params)) qs += (qs ? '&' : '') + k + '=' + (v ?? '')
+const url = `wss://webcast100-ws-web-hl.douyin.com/webcast/im/push/v2/?${qs}&signature=${signature}`
+
+const variant = process.argv[3] || 'browser-headers'
+const headers = { Cookie: raw, 'User-Agent': UA, Origin: 'https://live.douyin.com' }
+if (variant === 'browser-headers') {
+  Object.assign(headers, {
+    'Accept-Language': 'zh-CN,zh;q=0.9',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+    'Sec-Fetch-Dest': 'websocket',
+    'Sec-Fetch-Mode': 'websocket',
+    'Sec-Fetch-Site': 'same-site',
+  })
+}
+
+const ws = new WebSocket(url, { headers, perMessageDeflate: variant === 'browser-headers' })
+ws.on('open', () => {
+  console.log(`[${variant}] OPEN — 建连成功`)
+  ws.send(Buffer.from([0x3a, 0x02, 0x68, 0x62]))
+  setTimeout(() => process.exit(0), 8000)
+})
+ws.on('message', (d) => console.log(`[${variant}] frame ${d.length}B`))
+ws.on('error', (e) => console.log(`[${variant}] error:`, e.message))
+ws.on('unexpected-response', (_q, r) => {
+  let b = ''
+  r.on('data', (c) => (b += c.toString()))
+  r.on('end', () => {
+    console.log(`[${variant}] HTTP ${r.statusCode}`, b.slice(0, 120) || '(空响应体)')
+    process.exit(1)
+  })
+})
+setTimeout(() => process.exit(2), 15000)

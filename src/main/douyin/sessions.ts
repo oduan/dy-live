@@ -59,6 +59,28 @@ async function __pageFetch(url: string, sign: boolean): Promise<PageFetchResult>
 }
 
 /**
+ * 在页面上下文执行的二进制 fetch：返回 base64（protobuf 接口用，避免 text 编码损伤字节）。
+ */
+async function __pageFetchBinary(url: string): Promise<{ status: number; b64: string; err?: string }> {
+  try {
+    const resp = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { accept: 'application/json, text/plain, */*' }
+    })
+    const buf = new Uint8Array(await resp.arrayBuffer())
+    let bin = ''
+    const CH = 0x8000
+    for (let i = 0; i < buf.length; i += CH) {
+      bin += String.fromCharCode.apply(null, buf.subarray(i, i + CH) as unknown as number[])
+    }
+    return { status: resp.status, b64: btoa(bin) }
+  } catch (err: any) {
+    return { status: 0, b64: '', err: String(err?.message ?? err) }
+  }
+}
+
+/**
  * 抖音会话管理：
  * - persist:douyin：登录态会话（登录 webview + 隐藏 www 页，用于关注列表等需登录接口）
  * - guest：未登录会话（隐藏 live.douyin.com 页，以游客身份加载直播间，与登录态完全隔离）
@@ -254,6 +276,34 @@ export class DouyinSessions {
     }
   }
 
+  /**
+   * 读取 guest 页 Tea SDK 缓存的设备 ID——页面自建 WS/接口所用 user_unique_id 与其同源
+   * （localStorage.__tea_cache_tokens_6383 = { web_id, user_unique_id }）。
+   * 用随机数会被服务端静默拒绝路由（握手成功但不下发房间消息）。
+   */
+  async getGuestWebId(): Promise<string> {
+    const expr = `(() => {
+      try {
+        const raw = localStorage.getItem('__tea_cache_tokens_6383')
+        if (raw) {
+          const t = JSON.parse(raw)
+          if (t && typeof t.user_unique_id === 'string' && /^\\d{15,20}$/.test(t.user_unique_id)) return t.user_unique_id
+          if (t && typeof t.web_id === 'string' && /^\\d{15,20}$/.test(t.web_id)) return t.web_id
+        }
+      } catch (e) {}
+      return ''
+    })()`
+    for (let i = 0; i < 3; i++) {
+      try {
+        const wc = await this.ensureGuest()
+        const id = (await wc.executeJavaScript(expr, false)) as unknown
+        if (typeof id === 'string' && id) return id
+      } catch {}
+      await sleep(800) // Tea 缓存可能在页面加载完成后稍晚写入
+    }
+    return this.getGuestCookie('webid')
+  }
+
   getUserAgent(): string {
     return this.ua
   }
@@ -295,31 +345,50 @@ export class DouyinSessions {
     }
   }
 
-  /** 在 guest 页面上下文调用抖音 frontierSign（IM 弹幕 WS 的 signature 参数） */
-  async frontierSign(input: string): Promise<string> {
+  /**
+   * 在 guest 页面上下文调用抖音 frontierSign（IM 弹幕 WS 的 signature 参数）。
+   * 逆向结论（详见 research/douyin-live-protocol.md）：IM SDK 的签名输入不是查询串，
+   * 而是 { X-MS-STUB: md5(签名参数白名单逗号串) }；web 端 websocket_key 白名单为空数组，
+   * 故 stub 恒为 md5("") = d41d8cd98f00b204e9800998ecf8427e，返回值取 X-Bogus。
+   */
+  async frontierSign(): Promise<string> {
+    const MD5_EMPTY = 'd41d8cd98f00b204e9800998ecf8427e'
     try {
       const wc = await this.ensureGuest()
       const expr = `(() => {
         const ba = window.byted_acrawler
         if (!ba || typeof ba.frontierSign !== 'function') return { __missing: true }
         try {
-          return ba.frontierSign(${JSON.stringify(input)})
+          return ba.frontierSign({ 'X-MS-STUB': ${JSON.stringify(MD5_EMPTY)} })
         } catch (e) {
           return { __error: String(e) }
         }
       })()`
       const r = (await wc.executeJavaScript(expr, false)) as unknown
-      log('chat', 'frontierSign 原始返回:', JSON.stringify(r)?.slice(0, 200))
-      if (typeof r === 'string') return r
-      if (r && typeof r === 'object') {
-        const o = r as Record<string, unknown>
-        for (const key of ['signature', 'X-Bogus']) {
-          if (typeof o[key] === 'string') return o[key] as string
-        }
-        const v = Object.values(o).find((x) => typeof x === 'string' && (x as string).length > 8)
-        return typeof v === 'string' ? v : ''
+      if (r && typeof r === 'object' && '__missing' in (r as Record<string, unknown>)) {
+        log('chat', 'guest 页无 byted_acrawler（页面未加载 webmssdk）')
+        return ''
       }
-      return ''
+      if (r && typeof r === 'object' && '__error' in (r as Record<string, unknown>)) {
+        log('chat', 'frontierSign 执行异常:', String((r as Record<string, unknown>).__error))
+        return ''
+      }
+      let sig = ''
+      if (typeof r === 'string') sig = r
+      else if (r && typeof r === 'object') {
+        const o = r as Record<string, unknown>
+        for (const key of ['X-Bogus', 'signature']) {
+          if (typeof o[key] === 'string') {
+            sig = o[key] as string
+            break
+          }
+        }
+        if (!sig) {
+          const v = Object.values(o).find((x) => typeof x === 'string' && (x as string).length > 8)
+          sig = typeof v === 'string' ? v : ''
+        }
+      }
+      return sig
     } catch (e) {
       log('chat', 'frontierSign 执行失败:', (e as Error)?.message)
       return ''
@@ -402,6 +471,27 @@ export class DouyinSessions {
         reject(new Error(`GUEST_INIT_FAILED:${String((e as Error)?.message ?? e)}`))
       })
     })
+  }
+
+  /** 二进制形态的页面内 fetch（base64 传输），供 protobuf 接口（im/fetch 握手）使用 */
+  async pageFetchBinary(wc: WebContents, url: string): Promise<{ status: number; body: Buffer; err?: string }> {
+    if (wc === this.guestWin?.webContents) this.lastGuestUse = Date.now()
+    if (wc.isDestroyed()) {
+      if (wc === this.guestWin?.webContents) this.guestReady = false
+      throw new Error('PAGE_DEAD')
+    }
+    const expr = `(${__pageFetchBinary.toString()})(${JSON.stringify(url)})`
+    try {
+      const res = (await withTimeout(wc.executeJavaScript(expr, false) as Promise<{ status: number; b64: string; err?: string }>, 25_000, 'EXEC_TIMEOUT')) as {
+        status: number
+        b64: string
+        err?: string
+      }
+      return { status: res.status, body: Buffer.from(res.b64 || '', 'base64'), err: res.err }
+    } catch (e) {
+      if (wc === this.guestWin?.webContents) this.guestReady = false
+      throw new Error(`PAGE_EXEC_FAILED:${String((e as Error)?.message ?? e)}`)
+    }
   }
 
   // ---------- 页面内 fetch ----------
