@@ -808,9 +808,22 @@ img {
   text-shadow: 0 4px 24px rgba(0, 0, 0, 0.8);
 }
 
-.ended-sub {
-  color: #b8bece;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+/* 全屏时头像左侧的返回按钮（退出直播间回列表） */
+.pane-back {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e8ebf2;
+  background: rgba(0, 0, 0, 0.32);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.pane-back:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .ended-actions {

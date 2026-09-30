@@ -108,6 +108,13 @@ export const IconLogout = ({ size = 16 }: { size?: number }) => (
   </Svg>
 )
 
+export const IconBack = ({ size = 18, className }: { size?: number; className?: string }) => (
+  <Svg size={size} className={className}>
+    <path d="M19 12H5" />
+    <path d="m11 18-6-6 6-6" />
+  </Svg>
+)
+
 export const IconLive = ({ size = 8 }: { size?: number }) => (
   <svg viewBox="0 0 8 8" width={size} height={size} aria-hidden="true">
     <circle cx="4" cy="4" r="4" fill="currentColor" />

@@ -152,6 +152,7 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
             muted={settings.muted}
             onVolume={(v) => persistSettings({ volume: v })}
             onMuted={(m) => persistSettings({ muted: m })}
+            onClose={() => setSelected(null)}
           />
         ) : (
           <div className="pane-empty">

@@ -6,6 +6,7 @@ import { LiveStreamPlayer } from '../lib/player'
 import { AudioRing } from './AudioRing'
 import {
   IconAlert,
+  IconBack,
   IconChat,
   IconExternal,
   IconFullscreen,
@@ -45,6 +46,8 @@ export interface PlayerPaneProps {
   muted: boolean
   onVolume: (v: number) => void
   onMuted: (m: boolean) => void
+  /** 退出直播间（返回列表）；全屏时会先退出全屏 */
+  onClose: () => void
 }
 
 export function PlayerPane(p: PlayerPaneProps) {
@@ -409,6 +412,12 @@ export function PlayerPane(p: PlayerPaneProps) {
     }
   }
 
+  /** 退出直播间：先脱离全屏（元素卸载时浏览器也会自动退出，双保险），再关闭房间回列表 */
+  const exitRoom = useCallback((): void => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+    p.onClose()
+  }, [p.onClose])
+
   const info = st.info
   const webRid = info?.webRid || item.webRid
   const browserUrl = `https://live.douyin.com/${webRid || item.roomId}`
@@ -471,6 +480,11 @@ export function PlayerPane(p: PlayerPaneProps) {
       {/* 顶部信息条 */}
       {(st.phase === 'live' || st.phase === 'ended') && (
         <header className="pane-top">
+          {fullscreen && (
+            <button className="pane-back" onClick={exitRoom} title="退出直播间">
+              <IconBack size={17} />
+            </button>
+          )}
           <div className="pane-avatar" title={info?.nickname || item.nickname}>
             {avatarUrl ? <img src={avatarUrl} alt="" referrerPolicy="no-referrer" /> : <IconLogo size={14} />}
           </div>
@@ -504,7 +518,6 @@ export function PlayerPane(p: PlayerPaneProps) {
       {st.phase === 'ended' && (
         <div className="pane-ended">
           <div className="ended-title">直播已结束</div>
-          <div className="ended-sub">主播已下播 · 画面停留在最后一帧</div>
           <div className="ended-actions">
             <button className="btn-primary" onClick={() => setReloadKey((k) => k + 1)}>
               <IconRefresh size={15} /> 刷新重试
