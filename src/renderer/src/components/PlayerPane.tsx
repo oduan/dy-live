@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatItem, LiveItem, RoomEnterResult, RoomInfo, StreamChoice } from '@shared/types'
 import { api } from '../lib/dy'
+import { ContentCropper } from '../lib/contentCrop'
 import { LiveStreamPlayer } from '../lib/player'
 import { AudioRing } from './AudioRing'
 import {
@@ -67,6 +68,8 @@ export function PlayerPane(p: PlayerPaneProps) {
   const paneRef = useRef<HTMLDivElement>(null)
   const chatListRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<LiveStreamPlayer | null>(null)
+  /** PK/连麦智能取景（检测流内留边并放大内容区） */
+  const cropRef = useRef<ContentCropper | null>(null)
   const audioGraphRef = useRef<AudioContext | null>(null)
   const candsRef = useRef<StreamChoice[]>([])
   const candIdx = useRef(0)
@@ -262,7 +265,13 @@ export function PlayerPane(p: PlayerPaneProps) {
     }
     void audioGraphRef.current?.resume().catch(() => {})
     startPlaybackRef.current(0)
+    // PK/连麦智能取景：跟随本轮直播会话创建，切房/重连时销毁重建
+    cropRef.current?.destroy()
+    cropRef.current = new ContentCropper()
+    if (videoRef.current) cropRef.current.attach(videoRef.current)
     return () => {
+      cropRef.current?.destroy()
+      cropRef.current = null
       playerRef.current?.destroy()
       playerRef.current = null
     }
@@ -698,7 +707,13 @@ function AudioBackdrop(props: {
 }) {
   return (
     <div className={props.dimmed ? 'audio-backdrop dimmed' : 'audio-backdrop'}>
-      {props.bg && <img className="audio-bg" src={props.bg} alt="" referrerPolicy="no-referrer" />}
+      {props.bg && (
+        <>
+          {/* 底层模糊铺满填白，上层清晰原图（保持比例） */}
+          <img className="audio-bg-blur" src={props.bg} alt="" referrerPolicy="no-referrer" />
+          <img className="audio-bg" src={props.bg} alt="" referrerPolicy="no-referrer" />
+        </>
+      )}
       <div className="audio-card">
         <div className="audio-avatar">
           {props.avatar ? <img src={props.avatar} alt="" referrerPolicy="no-referrer" /> : <IconLogo size={44} />}
