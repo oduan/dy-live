@@ -15,6 +15,7 @@ export const IPC = {
   SettingsSet: 'settings:set',
   WinMinimize: 'win:minimize',
   WinMaximize: 'win:maximize',
+  WinClose: 'win:close',
   WinFullscreen: 'win:fullscreen',
   OpenExternal: 'app:openExternal',
   UpdateGetState: 'update:getState',
@@ -28,6 +29,7 @@ export const IPC = {
   EvRoomStatus: 'ev:roomStatus',
   EvNetBlocked: 'ev:netBlocked',
   EvNetRecovered: 'ev:netRecovered',
+  EvWinMaxChanged: 'ev:winMaxChanged',
   EvUpdateState: 'ev:updateState',
   EvChatMessage: 'ev:chatMessage'
 } as const

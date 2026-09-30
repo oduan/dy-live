@@ -89,6 +89,10 @@ export function registerIpc(ctx: IpcContext): void {
     if (w) w.isMaximized() ? w.unmaximize() : w.maximize()
     return ok(true)
   })
+  ipcMain.handle(IPC.WinClose, (e) => {
+    BrowserWindow.fromWebContents(e.sender)?.close()
+    return ok(true)
+  })
   ipcMain.handle(IPC.WinFullscreen, (e) => {
     const w = BrowserWindow.fromWebContents(e.sender)
     if (w) w.setFullScreen(!w.isFullScreen())

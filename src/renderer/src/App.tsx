@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { LiveItem, ListResult, ProfileInfo, Settings } from '@shared/types'
 import { api } from './lib/dy'
 import { LoginGate } from './components/LoginGate'
 import { Sidebar } from './components/Sidebar'
 import { PlayerPane } from './components/PlayerPane'
+import { TitleBar } from './components/TitleBar'
 import { IconLogo } from './components/Icons'
 
 const DEFAULT_SETTINGS: Settings = {
@@ -27,16 +28,27 @@ export default function App() {
     return off
   }, [])
 
+  let body: ReactNode
   if (auth.status === 'checking') {
-    return (
+    body = (
       <div className="splash">
         <IconLogo size={40} />
         <div className="spinner" />
       </div>
     )
+  } else if (auth.status === 'out') {
+    body = <LoginGate />
+  } else {
+    body = <MainLayout profile={auth.profile} />
   }
-  if (auth.status === 'out') return <LoginGate />
-  return <MainLayout profile={auth.profile} />
+
+  // 定制标题栏在所有状态下常驻（播放器 DOM 全屏时随元素全屏自动隐藏）
+  return (
+    <div className="app-root">
+      <TitleBar />
+      <div className="app-content">{body}</div>
+    </div>
+  )
 }
 
 function MainLayout(props: { profile: ProfileInfo | null }) {

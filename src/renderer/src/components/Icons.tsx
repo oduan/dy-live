@@ -158,3 +158,30 @@ export const IconLogo = ({ size = 26 }: { size?: number }) => (
     <path d="M12 9.5v13l10-6.5z" fill="#25f4ee" opacity="0.45" transform="translate(3 -1.5)" />
   </svg>
 )
+
+/* ========== 定制标题栏窗口控制按钮 ========== */
+export const IconWinMin = ({ size = 16 }: { size?: number }) => (
+  <Svg size={size} strokeWidth={2}>
+    <path d="M5 12h14" />
+  </Svg>
+)
+
+export const IconWinMax = ({ size = 16 }: { size?: number }) => (
+  <Svg size={size} strokeWidth={2}>
+    <rect x="5.5" y="5.5" width="13" height="13" rx="1.5" />
+  </Svg>
+)
+
+export const IconWinRestore = ({ size = 16 }: { size?: number }) => (
+  <Svg size={size} strokeWidth={2}>
+    <rect x="4.5" y="7.5" width="12" height="12" rx="1.5" />
+    <path d="M8 4.5h9.5A2 2 0 0 1 19.5 6.5V16" />
+  </Svg>
+)
+
+export const IconWinClose = ({ size = 16 }: { size?: number }) => (
+  <Svg size={size} strokeWidth={2}>
+    <path d="m6 6 12 12" />
+    <path d="M18 6 6 18" />
+  </Svg>
+)

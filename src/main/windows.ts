@@ -1,5 +1,6 @@
 import { BrowserWindow, screen } from 'electron'
 import { join } from 'node:path'
+import { IPC } from '@shared/ipc'
 import { store } from './store'
 import { debounce } from './util'
 
@@ -23,7 +24,8 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     backgroundColor: '#0d0e12',
-    autoHideMenuBar: true,
+    // 无边框窗口：系统标题栏由渲染层的定制标题栏替代（拖拽/窗口控制按钮）
+    frame: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -34,6 +36,13 @@ export function createMainWindow(): BrowserWindow {
   })
 
   win.once('ready-to-show', () => win.show())
+
+  // 最大化状态变化同步给渲染层：标题栏据此切换最大化/还原图标
+  const sendMaxState = (): void => {
+    if (!win.isDestroyed()) win.webContents.send(IPC.EvWinMaxChanged, { maximized: win.isMaximized() })
+  }
+  win.on('maximize', sendMaxState)
+  win.on('unmaximize', sendMaxState)
 
   const saveBounds = debounce(() => {
     if (win.isDestroyed() || win.isMinimized()) return

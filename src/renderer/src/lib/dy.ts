@@ -37,7 +37,9 @@ export const api = {
   settingsGet: () => inv<Settings>(IPC.SettingsGet),
   settingsSet: (patch: Partial<Settings>) => inv<Settings>(IPC.SettingsSet, patch),
 
+  winMinimize: () => inv<IpcResult<boolean>>(IPC.WinMinimize),
   winMaximize: () => inv<IpcResult<boolean>>(IPC.WinMaximize),
+  winClose: () => inv<IpcResult<boolean>>(IPC.WinClose),
   winFullscreen: () => inv<IpcResult<boolean>>(IPC.WinFullscreen),
   openExternal: (url: string) => inv<IpcResult<boolean>>(IPC.OpenExternal, url),
 
@@ -51,6 +53,8 @@ export const api = {
   onRoomStatus: (cb: (e: RoomStatusEvent) => void) => dy.on(IPC.EvRoomStatus, cb as (d: unknown) => void),
   onNetBlocked: (cb: (e: NetBlockedEvent) => void) => dy.on(IPC.EvNetBlocked, cb as (d: unknown) => void),
   onNetRecovered: (cb: () => void) => dy.on(IPC.EvNetRecovered, cb as () => void),
+  onWinMaxChanged: (cb: (e: { maximized: boolean }) => void) =>
+    dy.on(IPC.EvWinMaxChanged, cb as (d: unknown) => void),
   onUpdateState: (cb: (e: UpdateStateEvent) => void) => dy.on(IPC.EvUpdateState, cb as (d: unknown) => void),
   onChatMessage: (cb: (e: ChatEvent) => void) => dy.on(IPC.EvChatMessage, cb as (d: unknown) => void)
 }
