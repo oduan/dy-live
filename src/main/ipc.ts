@@ -71,13 +71,12 @@ export function registerIpc(ctx: IpcContext): void {
   ipcMain.handle(IPC.SettingsSet, (_e, patch: Partial<Settings> | undefined) => {
     const cur = ctx.store.get().settings
     const next: Settings = {
-      refreshIntervalSec: clamp(Number(patch?.refreshIntervalSec ?? cur.refreshIntervalSec) || 300, 120, 1800),
       volume: clamp(Number(patch?.volume ?? cur.volume), 0, 1),
-      muted: typeof patch?.muted === 'boolean' ? patch.muted : cur.muted
+      muted: typeof patch?.muted === 'boolean' ? patch.muted : cur.muted,
+      loudnessNorm: typeof patch?.loudnessNorm === 'boolean' ? patch.loudnessNorm : cur.loudnessNorm,
+      appGainDb: clamp(Number(patch?.appGainDb ?? cur.appGainDb) || 0, -24, 12)
     }
-    const intervalChanged = next.refreshIntervalSec !== cur.refreshIntervalSec
     ctx.store.patch({ settings: next })
-    if (intervalChanged) ctx.liveList.rearm()
     return next
   })
 

@@ -2,10 +2,13 @@ import type { ListResult, LiveItem } from '@shared/types'
 import { IPC } from '@shared/ipc'
 import type { DouyinApi } from './api'
 import { LIST_PAGE_SIZE } from './api'
-import { clamp, log } from '../util'
+import { log } from '../util'
 
 /** 自动刷新时最多回拉的页数（限制单轮请求量，防风控） */
 const REFRESH_PAGE_CAP = 5
+
+/** 自动刷新间隔（秒）+ 随机抖动，防风控 */
+const REFRESH_INTERVAL_SEC = 180
 
 export interface LiveListDeps {
   api: DouyinApi
@@ -15,7 +18,6 @@ export interface LiveListDeps {
 }
 
 interface StoreLike {
-  get(): { settings: { refreshIntervalSec: number }; cache: { list?: any } }
   patch(p: { cache?: any }): void
 }
 
@@ -44,14 +46,8 @@ export class LiveListService {
     clearTimeout(this.timer)
   }
 
-  rearm(): void {
-    clearTimeout(this.timer)
-    if (!this.stopped) this.arm()
-  }
-
   private arm(): void {
-    const sec = clamp(this.deps.store.get().settings.refreshIntervalSec, 120, 1800)
-    const delay = sec * 1000 + Math.random() * 15_000
+    const delay = REFRESH_INTERVAL_SEC * 1000 + Math.random() * 15_000
     this.nextAutoAt = Date.now() + delay
     this.deps.broadcast(IPC.EvNextRefresh, { at: this.nextAutoAt })
     this.timer = setTimeout(() => {

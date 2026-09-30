@@ -89,10 +89,12 @@ export interface RoomStatusEvent {
 }
 
 export interface Settings {
-  /** 列表自动刷新间隔（秒），默认 300，范围 120–1800 */
-  refreshIntervalSec: number
   volume: number
   muted: boolean
+  /** 响度自动平衡：各直播间响度归一化到统一目标（BS.1770 纯增益），默认开 */
+  loudnessNorm: boolean
+  /** 应用级增益（dB），叠加在响度归一化之上，范围 -24 ~ +12，默认 0 */
+  appGainDb: number
 }
 
 export interface AuthState {

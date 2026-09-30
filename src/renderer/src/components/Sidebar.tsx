@@ -20,16 +20,10 @@ export interface SidebarProps {
   onSelect: (item: LiveItem) => void
   onReachBottom: () => void
   onRefresh: () => void
-  onIntervalChange: (sec: number) => void
+  onLoudnessNorm: (v: boolean) => void
+  onAppGainDb: (db: number) => void
   onLogout: () => void
 }
-
-const INTERVAL_OPTIONS = [
-  { label: '3 分钟', value: 180 },
-  { label: '5 分钟', value: 300 },
-  { label: '10 分钟', value: 600 },
-  { label: '15 分钟', value: 900 }
-]
 
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(Date.now())
@@ -93,17 +87,35 @@ export function Sidebar(p: SidebarProps) {
               <>
                 <div className="menu-mask" onClick={() => setMenuOpen(false)} />
                 <div className="menu">
-                  <div className="menu-title">自动刷新间隔</div>
-                  <div className="interval-row">
-                    {INTERVAL_OPTIONS.map((o) => (
-                      <button
-                        key={o.value}
-                        className={`interval-opt ${p.settings.refreshIntervalSec === o.value ? 'active' : ''}`}
-                        onClick={() => p.onIntervalChange(o.value)}
-                      >
-                        {o.label}
-                      </button>
-                    ))}
+                  <div className="menu-title">音频</div>
+                  <div className="switch-row">
+                    <span>响度自动平衡</span>
+                    <button
+                      className={`switch ${p.settings.loudnessNorm ? 'on' : ''}`}
+                      role="switch"
+                      aria-checked={p.settings.loudnessNorm}
+                      title="响度自动平衡"
+                      onClick={() => p.onLoudnessNorm(!p.settings.loudnessNorm)}
+                    >
+                      <span className="switch-knob" />
+                    </button>
+                  </div>
+                  <div className="gain-row">
+                    <span className="gain-label">应用增益</span>
+                    <input
+                      type="range"
+                      className="gain-range"
+                      min={-24}
+                      max={12}
+                      step={1}
+                      value={p.settings.appGainDb}
+                      title="应用级增益：不动系统音量，整体调节应用声音大小"
+                      onChange={(e) => p.onAppGainDb(Number(e.target.value))}
+                    />
+                    <span className="gain-val">
+                      {p.settings.appGainDb > 0 ? '+' : ''}
+                      {p.settings.appGainDb} dB
+                    </span>
                   </div>
                   <div className="menu-divider" />
                   {confirmLogout ? (

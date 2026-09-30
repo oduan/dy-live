@@ -3,6 +3,7 @@ import type { ChatItem, LiveItem, RoomEnterResult, RoomInfo, StreamChoice } from
 import { api } from '../lib/dy'
 import { ContentCropper } from '../lib/contentCrop'
 import { LiveStreamPlayer } from '../lib/player'
+import { LoudnessNormalizer } from '../lib/loudness'
 import { AudioRing } from './AudioRing'
 import {
   IconAlert,
@@ -44,6 +45,10 @@ export interface PlayerPaneProps {
   item: LiveItem
   volume: number
   muted: boolean
+  /** 响度自动平衡（各直播间响度拉齐到统一目标） */
+  loudnessNorm: boolean
+  /** 应用级增益（dB），叠加在归一化之上，系统音量不变时调节应用声音大小 */
+  appGainDb: number
   onVolume: (v: number) => void
   onMuted: (m: boolean) => void
   /** 退出直播间（返回列表）；全屏时会先退出全屏 */
@@ -74,6 +79,8 @@ export function PlayerPane(p: PlayerPaneProps) {
   /** PK/连麦智能取景（检测流内留边并放大内容区） */
   const cropRef = useRef<ContentCropper | null>(null)
   const audioGraphRef = useRef<AudioContext | null>(null)
+  /** 响度自动平衡（挂在音频图上，随图一起创建/销毁） */
+  const normRef = useRef<LoudnessNormalizer | null>(null)
   const candsRef = useRef<StreamChoice[]>([])
   const candIdx = useRef(0)
   const seqRef = useRef(0)
@@ -246,8 +253,8 @@ export function PlayerPane(p: PlayerPaneProps) {
   // phase -> live 时挂载播放器
   useEffect(() => {
     if (st.phase !== 'live') return
-    // 音频可视化：media element → AnalyserNode（MSE 源为同源 blob，无跨域污染；
-    // createMediaElementSource 对同一元素仅可调用一次，成功后随元素存活）
+    // 音频链路：media element → [响度归一化] → AnalyserNode → 输出（MSE 源为同源 blob，
+    // 无跨域污染；createMediaElementSource 对同一元素仅可调用一次，成功后随元素存活）
     if (!audioGraphRef.current) {
       const v = videoRef.current
       try {
@@ -257,7 +264,17 @@ export function PlayerPane(p: PlayerPaneProps) {
           const an = ctx.createAnalyser()
           an.fftSize = 512
           an.smoothingTimeConstant = 0.8
-          src.connect(an)
+          // 响度自动平衡；失败（如内核不支持 IIRFilter）时退回直连，仅损失归一化
+          try {
+            const norm = new LoudnessNormalizer(ctx, { roomId: item.roomId, enabled: p.loudnessNorm })
+            norm.setSourceGainDb(p.muted || p.volume <= 0 ? null : 20 * Math.log10(p.volume))
+            norm.setTrimDb(p.appGainDb)
+            src.connect(norm.input)
+            norm.output.connect(an)
+            normRef.current = norm
+          } catch {
+            src.connect(an)
+          }
           an.connect(ctx.destination)
           audioGraphRef.current = ctx
           setAnalyser(an)
@@ -311,22 +328,36 @@ export function PlayerPane(p: PlayerPaneProps) {
     }
   }, [st.phase])
 
-  // 卸载时释放音频图：AudioContext 每房间创建一个，不关闭会随切房累积泄漏
+  // 卸载时释放音频图：AudioContext 每房间创建一个，不关闭会随切房累积泄漏；
+  // 归一化器先析构，把本房间响度写入跨房间记忆
   useEffect(() => {
     return () => {
+      normRef.current?.destroy()
+      normRef.current = null
       void audioGraphRef.current?.close().catch(() => {})
       audioGraphRef.current = null
     }
   }, [])
 
-  // 音量 / 静音
+  // 音量 / 静音（元素音量作用于测量之前，同步补偿给归一化器）
   useEffect(() => {
     const v = videoRef.current
     if (v) {
       v.volume = p.volume
       v.muted = p.muted
     }
+    normRef.current?.setSourceGainDb(p.muted || p.volume <= 0 ? null : 20 * Math.log10(p.volume))
   }, [p.volume, p.muted, st.phase])
+
+  // 响度自动平衡开关
+  useEffect(() => {
+    normRef.current?.setEnabled(p.loudnessNorm)
+  }, [p.loudnessNorm])
+
+  // 应用级增益
+  useEffect(() => {
+    normRef.current?.setTrimDb(p.appGainDb)
+  }, [p.appGainDb])
 
   // ---------- 房间状态事件 ----------
   useEffect(() => {

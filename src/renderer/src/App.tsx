@@ -6,7 +6,12 @@ import { Sidebar } from './components/Sidebar'
 import { PlayerPane } from './components/PlayerPane'
 import { IconLogo } from './components/Icons'
 
-const DEFAULT_SETTINGS: Settings = { refreshIntervalSec: 300, volume: 0.8, muted: false }
+const DEFAULT_SETTINGS: Settings = {
+  volume: 0.8,
+  muted: false,
+  loudnessNorm: true,
+  appGainDb: 0
+}
 
 export default function App() {
   const [auth, setAuth] = useState<{ status: 'checking' | 'out' | 'in'; profile: ProfileInfo | null }>({
@@ -140,7 +145,8 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
         onSelect={setSelected}
         onReachBottom={() => void loadMore()}
         onRefresh={() => (phase === 'error' ? void reload() : manualRefresh())}
-        onIntervalChange={(sec) => persistSettings({ refreshIntervalSec: sec })}
+        onLoudnessNorm={(v) => persistSettings({ loudnessNorm: v })}
+        onAppGainDb={(db) => persistSettings({ appGainDb: db })}
         onLogout={onLogout}
       />
       <main className="main-pane">
@@ -150,6 +156,8 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
             item={selected}
             volume={settings.volume}
             muted={settings.muted}
+            loudnessNorm={settings.loudnessNorm}
+            appGainDb={settings.appGainDb}
             onVolume={(v) => persistSettings({ volume: v })}
             onMuted={(m) => persistSettings({ muted: m })}
             onClose={() => setSelected(null)}

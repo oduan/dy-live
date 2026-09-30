@@ -353,36 +353,83 @@ img {
   margin: 2px 4px 8px;
 }
 
-.interval-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.interval-opt {
-  padding: 7px 0;
-  border-radius: 8px;
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  color: var(--text-dim);
-  font-size: 13px;
-  transition: all 0.15s;
-}
-
-.interval-opt:hover {
-  color: var(--text);
-}
-
-.interval-opt.active {
-  border-color: var(--accent);
-  color: var(--text);
-  background: rgba(254, 44, 85, 0.12);
-}
-
 .menu-divider {
   height: 1px;
   background: var(--line);
   margin: 10px 0;
+}
+
+/* 设置菜单内的开关行（响度自动平衡） */
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: left 0.15s, background 0.15s;
+}
+
+.switch.on {
+  background: rgba(254, 44, 85, 0.35);
+  border-color: var(--accent);
+}
+
+.switch.on .switch-knob {
+  left: 16px;
+  background: var(--text);
+}
+
+/* 设置菜单内的应用增益行 */
+.gain-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px 2px;
+}
+
+.gain-label {
+  font-size: 13px;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.gain-range {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.gain-val {
+  flex-shrink: 0;
+  min-width: 44px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
 }
 
 .menu-logout,
