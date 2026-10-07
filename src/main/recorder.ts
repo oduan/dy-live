@@ -47,14 +47,15 @@ export class RecordService {
     return this.file
   }
 
-  /** 录制根目录：设置值优先，默认 系统视频目录/dy-live */
+  /** 录制根目录：设置值优先，默认 系统视频目录/dy-live（开发实例默认落 dy-live-dev，不混入正式版录像） */
   resolveDir(): string {
     const custom = store.get().settings.recordDir
     if (custom) return custom
+    const dirName = app.isPackaged ? DEFAULT_DIR_NAME : `${DEFAULT_DIR_NAME}-dev`
     try {
-      return path.join(app.getPath('videos'), DEFAULT_DIR_NAME)
+      return path.join(app.getPath('videos'), dirName)
     } catch {
-      return path.join(app.getPath('home'), 'Videos', DEFAULT_DIR_NAME)
+      return path.join(app.getPath('home'), 'Videos', dirName)
     }
   }
 

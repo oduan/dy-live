@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { ProfileInfo } from '@shared/types'
@@ -13,6 +14,12 @@ import { ChatService } from './douyin/chat'
 import { UpdateService } from './updater'
 import { RecordService } from './recorder'
 import { log } from './util'
+
+// 开发/未打包运行使用独立数据目录：单实例锁按 userData 路径判定，
+// 设置、登录 Cookie、缓存也随之与正式版完全隔离，两边可同时运行互不影响
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'dy-live-dev'))
+}
 
 // www 登录态接口：间隔 ≥3s + 抖动；guest 直播接口：间隔 ≥2s + 抖动（均为串行队列）
 const wwwQueue = new RequestQueue('www', 3_000, 1_500)
