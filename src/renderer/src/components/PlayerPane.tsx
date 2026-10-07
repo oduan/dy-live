@@ -427,7 +427,33 @@ export function PlayerPane(p: PlayerPaneProps) {
   useEffect(() => {
     const off = api.onChatMessage((e) => {
       if (!e || e.roomId !== item.roomId) return
-      setChat((list) => [...list, ...e.items].slice(-150))
+      setChat((list) => {
+        let next: ChatItem[] | null = null
+        for (const it of e.items) {
+          const k = it.gift?.key
+          if (!k) {
+            next = next ? [...next, it] : [...list, it]
+            continue
+          }
+          // 礼物连击：同 key 行原位更新计数（首次出现则追加），不新开一行
+          const base = next ?? list
+          let idx = -1
+          for (let j = base.length - 1; j >= 0; j--) {
+            if (base[j].gift?.key === k) {
+              idx = j
+              break
+            }
+          }
+          if (idx >= 0) {
+            const copy = (next ?? list).slice()
+            copy[idx] = it
+            next = copy
+          } else {
+            next = next ? [...next, it] : [...list, it]
+          }
+        }
+        return (next ?? list).slice(-150)
+      })
     })
     return off
   }, [item.roomId])
@@ -880,8 +906,32 @@ export function PlayerPane(p: PlayerPaneProps) {
                     {m.content}
                   </div>
                 ) : m.kind === 'gift' ? (
-                  <div className="chat-gift" key={i}>
-                    <span className="chat-nick">{m.nick}</span> {m.content}
+                  <div
+                    className={cx(
+                      'chat-gift',
+                      !m.nick && 'anon',
+                      (m.gift?.diamond ?? 0) >= 1000 && 'royal',
+                      (m.gift?.diamond ?? 0) >= 100 && (m.gift?.diamond ?? 0) < 1000 && 'gold'
+                    )}
+                    key={m.gift?.key || i}
+                  >
+                    {m.gift?.avatar && (
+                      <img className="chat-gift-avatar" src={m.gift.avatar} alt="" referrerPolicy="no-referrer" />
+                    )}
+                    {m.gift?.icon && (
+                      <img className="chat-gift-icon" src={m.gift.icon} alt="" referrerPolicy="no-referrer" />
+                    )}
+                    <span className="chat-gift-text">
+                      {m.nick ? (
+                        <>
+                          <span className="chat-nick">{m.nick}</span> 送出
+                        </>
+                      ) : (
+                        '轻礼物 '
+                      )}
+                      {m.gift?.name || '礼物'}
+                      <span className="chat-gift-count">×{m.gift?.count ?? 1}</span>
+                    </span>
                   </div>
                 ) : (
                   <div className="chat-item" key={i}>

@@ -122,6 +122,22 @@ export interface UpdateStateEvent {
   message?: string
 }
 
+/** 礼物消息附加信息（ChatItem.kind='gift' 时存在） */
+export interface GiftInfo {
+  /** 渲染层原位合并键：同键行随连击原位更新计数（连击合并） */
+  key: string
+  /** 礼物名 */
+  name: string
+  /** 连击累计数量（服务端 repeat_count 累计值） */
+  count: number
+  /** 礼物静态图 */
+  icon?: string
+  /** 发送者头像 */
+  avatar?: string
+  /** 抖币单价（0 = 免费礼物/未下发） */
+  diamond?: number
+}
+
 /** 公屏弹幕消息（主进程 → 渲染进程，批量推送） */
 export interface ChatItem {
   /** 消息类型：chat 普通弹幕 / sys 系统提示 / gift 礼物 */
@@ -130,6 +146,7 @@ export interface ChatItem {
   /** 昵称展示色（HSL hue），sys 消息忽略 */
   color: number
   content: string
+  gift?: GiftInfo
 }
 
 export interface ChatEvent {

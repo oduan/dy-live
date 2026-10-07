@@ -1185,9 +1185,16 @@ img {
   opacity: 0.85;
 }
 
-/* 礼物弹幕：橙色区分 */
+/* 礼物弹幕：橙色区分；头像 + 礼物图标 + 连击计数，按抖币价值分档高亮 */
 .chat-gift {
-  margin: 4px 0;
+  margin: 6px 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(255, 160, 46, 0.07);
   font-size: 12.5px;
   line-height: 1.45;
   word-break: break-all;
@@ -1196,6 +1203,66 @@ img {
 
 .chat-gift .chat-nick {
   color: #ffa02e;
+}
+
+.chat-gift-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+  background: var(--bg-3);
+}
+
+.chat-gift-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.chat-gift-text {
+  min-width: 0;
+}
+
+.chat-gift-count {
+  margin-left: 4px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 匿名轻礼物（无发送者）：弱化一档 */
+.chat-gift.anon {
+  background: rgba(255, 160, 46, 0.04);
+  color: #d99a55;
+}
+
+.chat-gift.anon .chat-gift-count {
+  color: #d99a55;
+}
+
+/* 百元档（≥100 抖币）：金色 */
+.chat-gift.gold {
+  background: linear-gradient(90deg, rgba(255, 180, 40, 0.16), rgba(255, 140, 20, 0.05));
+  border: 1px solid rgba(255, 180, 40, 0.35);
+  color: #ffc24d;
+}
+
+.chat-gift.gold .chat-nick,
+.chat-gift.gold .chat-gift-count {
+  color: #ffc24d;
+}
+
+/* 千元档（≥1000 抖币）：豪华渐变 */
+.chat-gift.royal {
+  background: linear-gradient(90deg, rgba(255, 80, 120, 0.18), rgba(255, 160, 30, 0.1));
+  border: 1px solid rgba(255, 120, 90, 0.45);
+  color: #ff7fa4;
+}
+
+.chat-gift.royal .chat-nick,
+.chat-gift.royal .chat-gift-count {
+  color: #ff7fa4;
 }
 
 .chat-empty {

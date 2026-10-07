@@ -14,7 +14,8 @@ import WebSocket from 'ws'
 import { gunzipSync } from 'node:zlib'
 import { IPC } from '@shared/ipc'
 import type { ChatItem, ChatEvent } from '@shared/types'
-import { decodeFields, encodeBytesField, fint, fstr, type ProtoField } from './proto-lite'
+import { decodeFields, encodeBytesField, fstr, type ProtoField } from './proto-lite'
+import { GiftAggregator, dumpProtoTree, parseGiftMessage, parseLightGiftMessage, type ParsedGift } from './gift'
 import { log } from '../util'
 import type { DouyinSessions } from './sessions'
 
@@ -68,6 +69,8 @@ export class ChatService {
   private frameCount = 0
   /** 服务端在 im/fetch 握手里指派的 WSS 端点（字段 10/14），缺省用 WS_BASE */
   private pushServer = ''
+  /** 礼物连击聚合 + 礼物档案缓存（gift.ts） */
+  private gifts = new GiftAggregator()
   // ---------- 长轮询传输 ----------
   private pollTimer: NodeJS.Timeout | undefined
   private polling = false
@@ -92,6 +95,8 @@ export class ChatService {
     this.internalExt = ''
     this.buffer = []
     this.seenKeys = new Map()
+    this.gifts.reset()
+    log('chat', `开始连接房间 roomId=${this.roomId || '(缺)'} webRid=${this.webRid || '(缺)'}`)
     this.sys('正在连接弹幕…')
     void this.startPolling()
   }
@@ -243,6 +248,9 @@ export class ChatService {
    * WSS 会话握手：借 guest 页做一次 im/fetch（fetch_rule=1），取服务端签发的
    * cursor/internal_ext（内含 wss_push_room_id/wss_push_did 绑定）与 push_server 端点。
    * 跳过此握手直接建连：服务端接受连接但不路由房间消息（实测只回心跳）。
+   * 注意：游客会话不投递礼物消息（实测，见 research/douyin-live-protocol.md §5.2），
+   * 弹幕保持游客身份即收不到礼物行——如需礼物展示，把这里的页面换成
+   * 「persist:douyin 会话加载 live.douyin.com 的隐藏页」（登录态），gift.ts 解析层已就绪。
    */
   private async fetchImSession(): Promise<void> {
     const ses = this.deps.sessions
@@ -334,8 +342,27 @@ export class ChatService {
       if (!method || !mp) continue
       if (method === 'WebcastChatMessage') this.onChat(mp)
       else if (method === 'WebcastGiftMessage') this.onGift(mp)
+      // 轻礼物消息类型（实测登录会话下轻礼物多走普通 GiftMessage，此通道备用兼容）
+      else if (method === 'WebcastLightGiftMessage') this.onLightGift(mp)
       // 表情聊天：电台房的小心心等互动走此通道，显示为普通弹幕
       else if (method === 'WebcastEmojiChatMessage') this.onEmojiChat(mp)
+      else this.diagMethod(method, mp)
+    }
+  }
+
+  /**
+   * 诊断：DY_CHAT_DEBUG=1 时，每种未处理消息类型首次出现时记录名称；
+   * 方法名含 Gift 的消息完整 dump 字段树（协议漂移/新礼物通道定位用）。
+   */
+  private diagMethods = new Set<string>()
+  private diagMethod(method: string, mp: Buffer): void {
+    if (!process.env.DY_CHAT_DEBUG) return
+    if (/gift/i.test(method)) {
+      log('chat', `[debug] ${method} (${mp.length}B) 字段树:`)
+      log('chat', dumpProtoTree(mp))
+    } else if (!this.diagMethods.has(method)) {
+      this.diagMethods.add(method)
+      log('chat', `[debug] 未处理消息类型: ${method}`)
     }
   }
 
@@ -559,64 +586,47 @@ export class ChatService {
   }
 
   /**
-   * 礼物弹幕。GiftMessage{ common=1, gift_id=2, repeat_count=5(公开 proto 记 3，实测 5 有值), user=7, gift=16 }。
-   * 礼物名在 GiftStruct 内，字段号未完全确认：取第一个短中文字符串字段兜底。
-   * 设置 DY_CHAT_DEBUG=1 可输出地毯式字段勘察（用于协议漂移时重新校准）。
+   * 礼物弹幕。字段标定与连击聚合见 gift.ts（公开 proto 三源交叉验证 + 实测抓包）。
+   * 连击帧由 GiftAggregator 合并为同 key 行，渲染层原位更新计数；
+   * 设置 DY_CHAT_DEBUG=1 可输出解析详情（用于协议漂移时重新校准）。
    */
   private onGift(buf: Buffer): void {
-    const gm = decodeFields(buf)
+    this.emitGift(parseGiftMessage(buf))
+  }
+
+  /** 轻礼物（WebcastLightGiftMessage）：匿名，无发送者信息（gift.ts 有字段标定） */
+  private onLightGift(buf: Buffer): void {
+    this.emitGift(parseLightGiftMessage(buf))
+  }
+
+  private emitGift(parsed: ParsedGift | null): void {
+    if (!parsed) return
     if (process.env.DY_CHAT_DEBUG) {
-      const brief = [...gm.keys()]
-        .map((k) => {
-          const f = gm.get(k)![0]
-          return `${k}:${f.wire === 2 ? f.bytes.length + 'B' : String(f.int).slice(0, 10)}`
-        })
-        .join(' ')
-      log('chat', `[debug] GiftMessage (${buf.length}B) 字段: ${brief}`)
-      const user = gm.get(7)?.[0]
-      if (user) {
-        const u = decodeFields(user.bytes)
-        log('chat', `[debug] user(7): nick='${fstr(u.get(3)?.[0])}' 字段号:[${[...u.keys()].join(',')}]`)
-      }
-      const gift = gm.get(16)?.[0]
-      if (gift) {
-        const gf = decodeFields(gift.bytes)
-        for (const [no, list] of gf) {
-          const f = list[0]
-          if (f && f.wire === 2) {
-            const s = f.bytes.toString('utf8')
-            if (/^[\x20-\x7e\u4e00-\u9fa5A-Za-z0-9]+$/.test(s) && s.length <= 30) {
-              log('chat', `[debug] gift.${no} = '${s}'`)
-            }
-          }
-        }
-      }
+      log(
+        'chat',
+        `[debug] Gift: gift_id=${parsed.giftId} name='${parsed.name}' diamond=${parsed.diamond} ` +
+          `count=${parsed.repeatCount} end=${parsed.repeatEnd ? 1 : 0} group=${parsed.groupId || '-'} ` +
+          `user='${parsed.nick || '(匿名)'}' msg_id='${parsed.msgId || '-'}' icon=${parsed.icon ? '有' : '无'}`
+      )
     }
-    const user = gm.get(7)?.[0]
-    if (!user) return
-    const u = decodeFields(user.bytes)
-    const nick = fstr(u.get(3)?.[0])
-    if (!nick) return
-    const count = fint(gm.get(5)?.[0]) || fint(gm.get(3)?.[0]) || 1
-    let name = ''
-    const gift = gm.get(16)?.[0]
-    if (gift) {
-      const gf = decodeFields(gift.bytes)
-      for (const [no, list] of gf) {
-        const f = list[0]
-        if (!f || f.wire !== 2) continue
-        const s = f.bytes.toString('utf8')
-        if (!name && /^[\u4e00-\u9fa5A-Za-z0-9]{1,12}$/.test(s)) name = s
-      }
-    }
-    const msgId = this.msgIdOf(gm)
-    const key = msgId || `g|${nick}|${name}|${count}`
+    const msgId = parsed.msgId
+    const key = msgId || `g|${parsed.uid || parsed.nick}|${parsed.giftId}|${parsed.groupId}|${parsed.repeatCount}`
     if (this.isDup(key)) return
+    const agg = this.gifts.consume(parsed)
+    if (!agg) return
     this.buffer.push({
       kind: 'gift',
-      nick,
-      color: colorFor(nick),
-      content: `送出「${name || '礼物'}」×${count}`
+      nick: agg.nick,
+      color: colorFor(agg.nick),
+      content: agg.nick ? `送出「${agg.name}」×${agg.count}` : `轻礼物「${agg.name}」×${agg.count}`,
+      gift: {
+        key: agg.key,
+        name: agg.name,
+        count: agg.count,
+        icon: agg.icon || undefined,
+        avatar: agg.avatar || undefined,
+        diamond: agg.diamond || undefined
+      }
     })
     this.scheduleFlush()
   }

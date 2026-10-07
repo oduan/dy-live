@@ -251,14 +251,94 @@ ChatMessage{ common=1{method=1, msg_id=2, room_id=3,...}, user=2{id=1, nick_name
 
 ### 5.2 GiftMessage（礼物）
 
+> 2026-10-07 完成完整标定：公开 proto 三源交叉验证（`zboyco/douyin-live`、
+> `saermart/DouyinLiveWebFetcher` 的 douyin.proto 与 `Johnserf-Seed/f2` 的编译描述符
+> 字段表**完全一致**），并经**真实流量回放确认**（登录会话实收小心心帧：
+> gift_id=463、name=16 解出「小心心」、diamond_count=12 解出 1、icon/连击组/
+> repeat_end 全部吻合）。实现见 `src/main/douyin/gift.ts`，
+> 断言与回放见 `scripts/test-gift-parse.mjs`。
+
+**⚠️ 身份门槛（2026-10-07 实测，本节最重要的结论）**：礼物消息**只投递给登录会话**。
+- 游客会话（应用 guest 页、独立 Cookie jar 的 im/fetch 轮询、匿名浏览器网页）在礼物
+  活跃房间连续监听 4~45 分钟：全部 14 种消息类型照收（弹幕/进场/点赞/统计…），
+  **唯独没有任何 GiftMessage/LightGiftMessage**；
+- 同一房间切登录会话（persist:douyin 隐藏页）后，手机端送礼**立即**到达，连击
+  开始/收尾帧（repeat_end=0→1）齐全；
+- 官方网页同理：匿名无痕窗口看不到礼物，登录后立即显示——与官方行为一致。
+- 因此弹幕拉取必须用登录态页面（`sessions.ensureAuthLive`），未登录回退游客
+  （此时礼物列表为空是服务端行为，非 bug）。
+- 注意：登录会话下礼物的 `common.msg_id` 仍常为空，去重需走组合键兜底（已实现）。
+- 小心心（1 抖币轻礼物）在登录会话走**普通 WebcastGiftMessage**（带 user/GiftStruct），
+  不走 LightGiftMessage。
+
 ```
-GiftMessage{ common=1, gift_id=2, repeat_count=5(实测有值；公开 proto 记 3，疑两代并存), user=7{nick=3}, gift=16(GiftStruct{... 含礼物名 ...}), ... }
+GiftMessage{
+  common=1{method=1, msg_id=2, room_id=3,...},
+  gift_id=2,
+  fan_ticket_count=3, group_count=4,
+  repeat_count=5,        ← 连击累计数（服务端随每帧下发「当前累计值」，非增量）
+  combo_count=6,
+  user=7{..., nick_name=3, avatar_thumb=9{Image{url_list=1[], uri=2}}},
+  to_user=8,
+  repeat_end=9,          ← 1 = 该连击组的最后一帧
+  text_effect=10,
+  group_id=11,           ← 连击组 id（string，个别代际发 varint）
+  priority=14,
+  gift=15(GiftStruct),   ← 礼物档案
+  log_id=16(string),     ← 注意：16 是 log_id 字符串；个别旧代际把 GiftStruct 放 16，
+                            解析器以「16 能解出嵌套消息且含 name」判定兼容（仅在 15 缺失时）
+  send_type=17, tray_display_text=19, total_count=29, send_time=33, ...
+}
+GiftStruct{
+  image=1(Image), describe=2(如「送的浪漫礼物」), id=5,
+  combo=10, type=11, diamond_count=12(抖币单价), gift_label_icon=15,
+  name=16(礼物名), icon=21(Image), actionType=22
+}
+Image{ url_list=1 repeated string, uri=2 }
 ```
-- 采样期间（北京时间早晨）三个房间均未出现真实付费礼物，字段号未能 100% 实测标定；
-  现有实现：连击数取字段 5（兜底 3），礼物名取 GiftStruct 内第一个短中文字符串字段。
-- 复现校准工具：`research/dump_gift.cjs <抓包文件>` 打印任意 GiftMessage 的完整字段树；
-  或运行 `dy_client.mjs`/`poll_sample.mjs` 时设 `DY_CHAT_DEBUG=1` 输出地毯式勘察日志。
-- 想要快速看到礼物：晚间黄金时段在礼物密度高的房间（PK/情感/带货）采样，或用页面侧 `captureRoomWSUrl` 的现成连接观察。
+
+- **连击语义**：客户端连点时服务端按命中逐帧下发（repeat_count=1,2,3,… 递增，同一
+  group_id），末帧 repeat_end=1；批量赠送则单帧 repeat_count=N。展示层直接取
+  repeat_count（累计值），无需自行累加。
+- **礼物档案缓存**：连击中服务端偶发省略 GiftStruct 的帧，主进程按 gift_id 缓存
+  名称/图标/单价补齐（`GiftAggregator`，容量 400）。
+- **展示合并**：主进程把同 (user, gift, 连击组) 的帧合并为一条（原位更新计数），渲染层
+  按 `gift.key` 替换既有行，一条连击只占一行——对齐官方「昵称 送出 玫瑰 ×N」行为。
+- 校准工具：`node scripts/test-gift-parse.mjs samples/xxx.bin` 回放真实抓包；
+  `node dump_gift.cjs <抓包文件>` 打印任意批次字段树；
+  `research/poll_gifts.cjs` 为多房间礼物专用采样器（仅落盘含礼物的批次）。
+- 想要快速看到礼物：晚间黄金时段在礼物密度高的房间（PK/情感/带货）采样。
+
+### 5.3 LightGiftMessage（轻礼物）
+
+> 2026-10-07 补充实测：登录会话下 1 抖币级轻礼物（小心心 gift_id=463）也走普通
+> WebcastGiftMessage（带 user + GiftStruct，§5.2 已实锤），LightGiftMessage 在
+> 登录会话观察窗口内未出现；游客会话两类礼物消息都不投递。字段定义保留备用
+> （f2 编译描述符，第三公开源；其 GiftStruct/GiftMessage/Response 定义与 §5.2
+> 双源完全一致，反向验证了标定）。
+
+字段号来源：f2（Johnserf-Seed/f2）编译描述符（douyin_webcast_pb2.py 序列化
+FileDescriptorProto 解出，第三公开源；其 GiftStruct/GiftMessage/Response 定义与
+§5.2 双源完全一致，反向验证了标定）+ `research/light_samples` 实测抓包。
+
+```
+LightGiftMessage{
+  common=1{method=1, msg_id=2, room_id=3,...},
+  group_count=2, repeat_count=3, combo_count=4,   ← 计数语义同 GiftMessage（累计值）
+  to_user_id=5(主播), priority=6,
+  gift_info=7{gift_id=1, gift_icon=2(Image), diamond_count=3},
+  tray_info=8, send_type=9, count=10,
+  diy_item_info=11, banned_display_effects=12,
+  gift_struct=13(GiftStruct，同 §5.2：name=16/image=1/diamond_count=12)
+}
+```
+
+- **无发送者**：消息体不带 user——轻礼物是匿名聚合推送（官方页面也不在公屏展示
+  发送者）。展示为「轻礼物 小心心 ×N」，无昵称行。
+- 计数取 repeat_count（3），兜底 count（10）/ combo_count（4）。
+- 礼物名在 gift_struct.name；缺 struct 帧从 gift_info（gift_id/图标/单价）+ 主进程
+  档案缓存补齐。
+- 抓取工具：`research/grab_light.cjs`（仅落盘含 LightGiftMessage 的批次）。
 
 ### 5.3 EmojiChatMessage（电台表情聊天）
 
@@ -282,6 +362,10 @@ GiftMessage{ common=1, gift_id=2, repeat_count=5(实测有值；公开 proto 记
 | `dy_client.mjs` | 全链路独立客户端：引导→HTML→签名→WSS→解码 | `node --experimental-strip-types dy_client.mjs <web_rid> [秒] [--no-sign]` |
 | `poll_sample.mjs` | im/fetch 长轮询采样器（落盘 protobuf） | `DY_COOKIE_FILE=full_cookie.txt node --experimental-strip-types poll_sample.mjs <web_rid> [秒] [间隔ms]` |
 | `dump_gift.cjs` | 离线解析抓包，打印 GiftMessage 字段树 | `node dump_gift.cjs samples/batch-000.bin` |
+| `poll_gifts.cjs` | 多房间礼物专用采样器（仅落盘含礼物的批次） | `node --experimental-strip-types poll_gifts.cjs <秒> <间隔ms> <web_rid...>` |
+| `grab_sort.cjs` | 拉若干批并 dump GiftSortMessage/GiftMessage（内嵌礼物档案） | `node --experimental-strip-types grab_sort.cjs <web_rid>` |
+| `scan_old.cjs` / `scan_sort.cjs` | 扫描目录内样本统计指定消息类型 | `node --experimental-strip-types scan_old.cjs samples` |
+| `scripts/test-gift-parse.mjs`（仓库） | 礼物解析单元测试 + 真实抓包回放 | `node scripts/test-gift-parse.mjs [样本.bin]` |
 | `ws_header_test.mjs` / `ws_session_test.mjs` | WSS 门槛对照实验 | 见文件头注释 |
 | `proto-lite.ts` | 仓库同款 protobuf 极简解码器（软链拷贝） | — |
 | `samples/*.bin` | 三窗采样原始数据（~220 批） | 供离线分析 |
