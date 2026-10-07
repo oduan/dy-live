@@ -21,6 +21,12 @@ export const IPC = {
   UpdateGetState: 'update:getState',
   UpdateInstall: 'update:install',
   ChatStart: 'chat:start',
+  RecGetDir: 'rec:getDir',
+  RecPickDir: 'rec:pickDir',
+  RecStart: 'rec:start',
+  RecWrite: 'rec:write',
+  RecStop: 'rec:stop',
+  RecFinalizeDone: 'rec:finalizeDone',
 
   // 事件（主 → 渲染）
   EvAuthChanged: 'ev:authChanged',
@@ -31,7 +37,8 @@ export const IPC = {
   EvNetRecovered: 'ev:netRecovered',
   EvWinMaxChanged: 'ev:winMaxChanged',
   EvUpdateState: 'ev:updateState',
-  EvChatMessage: 'ev:chatMessage'
+  EvChatMessage: 'ev:chatMessage',
+  EvRecFinalize: 'ev:recFinalize'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

@@ -496,6 +496,40 @@ img {
   color: var(--text-dim);
 }
 
+/* 设置菜单内的直播录制保存位置行 */
+.rec-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+}
+
+.rec-dir {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rec-dir-btn {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 12px;
+  transition: all 0.15s;
+}
+
+.rec-dir-btn:hover {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
 .menu-logout,
 .logout-confirm {
   display: flex;
@@ -1045,6 +1079,39 @@ img {
 
 .ctl.ctl-on {
   color: var(--accent-2);
+}
+
+/* 直播录制按钮：录制中品牌红 + 红点脉冲 */
+.ctl.ctl-rec {
+  color: var(--accent);
+}
+
+.rec-dot {
+  position: relative;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.rec-dot::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid rgba(254, 44, 85, 0.5);
+  animation: rec-pulse 1.6s ease-out infinite;
+}
+
+@keyframes rec-pulse {
+  0% {
+    transform: scale(0.65);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.45);
+    opacity: 0;
+  }
 }
 
 /* 公屏弹幕停靠栏（占据右侧，推挤视频区） */

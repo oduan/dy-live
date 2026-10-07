@@ -65,7 +65,7 @@ class AppStore {
     return this.data
   }
 
-  patch(p: Partial<Pick<StoreShape, 'settings' | 'window'>> & { cache?: StoreShape['cache'] }): void {
+  patch(p: Partial<Pick<StoreShape, 'window'>> & { settings?: Partial<Settings>; cache?: StoreShape['cache'] }): void {
     if (p.settings) this.data.settings = { ...this.data.settings, ...p.settings }
     if (p.window) this.data.window = { ...this.data.window, ...p.window }
     if (p.cache) this.data.cache = { ...this.data.cache, ...p.cache }

@@ -7,6 +7,8 @@ import type {
   IpcResult,
   ListResult,
   NetBlockedEvent,
+  RecStartPayload,
+  RecStartResult,
   RoomEnterRef,
   RoomEnterResult,
   RoomStatusEvent,
@@ -47,6 +49,13 @@ export const api = {
   updateInstall: () => inv<IpcResult<boolean>>(IPC.UpdateInstall),
   chatStart: () => inv<boolean>(IPC.ChatStart),
 
+  recGetDir: () => inv<IpcResult<string>>(IPC.RecGetDir),
+  recPickDir: () => inv<IpcResult<string>>(IPC.RecPickDir),
+  recStart: (p: RecStartPayload) => inv<IpcResult<RecStartResult>>(IPC.RecStart, p),
+  recWrite: (id: number, chunk: ArrayBuffer) => inv<IpcResult<boolean>>(IPC.RecWrite, { id, chunk }),
+  recStop: (id?: number) => inv<IpcResult<string | null>>(IPC.RecStop, id),
+  recFinalizeDone: () => inv<IpcResult<boolean>>(IPC.RecFinalizeDone),
+
   onAuthChanged: (cb: (e: AuthChangedEvent) => void) => dy.on(IPC.EvAuthChanged, cb as (d: unknown) => void),
   onListAutoUpdated: (cb: (e: ListResult) => void) => dy.on(IPC.EvListAutoUpdated, cb as (d: unknown) => void),
   onNextRefresh: (cb: (e: { at: number }) => void) => dy.on(IPC.EvNextRefresh, cb as (d: unknown) => void),
@@ -56,5 +65,6 @@ export const api = {
   onWinMaxChanged: (cb: (e: { maximized: boolean }) => void) =>
     dy.on(IPC.EvWinMaxChanged, cb as (d: unknown) => void),
   onUpdateState: (cb: (e: UpdateStateEvent) => void) => dy.on(IPC.EvUpdateState, cb as (d: unknown) => void),
-  onChatMessage: (cb: (e: ChatEvent) => void) => dy.on(IPC.EvChatMessage, cb as (d: unknown) => void)
+  onChatMessage: (cb: (e: ChatEvent) => void) => dy.on(IPC.EvChatMessage, cb as (d: unknown) => void),
+  onRecFinalize: (cb: () => void) => dy.on(IPC.EvRecFinalize, cb as (d: unknown) => void)
 }

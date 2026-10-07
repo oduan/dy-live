@@ -4,6 +4,7 @@ import { api } from '../lib/dy'
 import { ContentCropper } from '../lib/contentCrop'
 import { LiveStreamPlayer } from '../lib/player'
 import { LoudnessNormalizer } from '../lib/loudness'
+import { LiveRecorder } from '../lib/recorder'
 import { AudioRing } from './AudioRing'
 import {
   IconAlert,
@@ -17,6 +18,7 @@ import {
   IconMute,
   IconPause,
   IconPlay,
+  IconRecord,
   IconRefresh,
   IconTimer,
   IconUsers,
@@ -71,6 +73,8 @@ export function PlayerPane(p: PlayerPaneProps) {
   const [chatOpen, setChatOpen] = useState(false)
   /** 本房间内是否已开过弹幕（开过之后连接一直保持到切房） */
   const [chatActive, setChatActive] = useState(false)
+  /** 直播录制进行中 */
+  const [recording, setRecording] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const paneRef = useRef<HTMLDivElement>(null)
@@ -81,6 +85,13 @@ export function PlayerPane(p: PlayerPaneProps) {
   const audioGraphRef = useRef<AudioContext | null>(null)
   /** 响度自动平衡（挂在音频图上，随图一起创建/销毁） */
   const normRef = useRef<LoudnessNormalizer | null>(null)
+  /** 录制音频旁路：源节点直连，取原始音频（不随音量/静音/归一化变化） */
+  const recDestRef = useRef<MediaStreamAudioDestinationNode | null>(null)
+  /** 直播录制器（随房间挂载，切房时自动收尾） */
+  const recorderRef = useRef<LiveRecorder | null>(null)
+  if (!recorderRef.current) recorderRef.current = new LiveRecorder()
+  /** 断流自动分段续录的次数（长段成功后重置） */
+  const recRestartsRef = useRef(0)
   const candsRef = useRef<StreamChoice[]>([])
   const candIdx = useRef(0)
   const seqRef = useRef(0)
@@ -275,6 +286,12 @@ export function PlayerPane(p: PlayerPaneProps) {
           } catch {
             src.connect(an)
           }
+          // 录制音频旁路：源节点直连取原始音频，录制不随音量/静音变化
+          try {
+            const recDest = ctx.createMediaStreamDestination()
+            src.connect(recDest)
+            recDestRef.current = recDest
+          } catch {}
           an.connect(ctx.destination)
           audioGraphRef.current = ctx
           setAnalyser(an)
@@ -329,11 +346,13 @@ export function PlayerPane(p: PlayerPaneProps) {
   }, [st.phase])
 
   // 卸载时释放音频图：AudioContext 每房间创建一个，不关闭会随切房累积泄漏；
-  // 归一化器先析构，把本房间响度写入跨房间记忆
+  // 归一化器先析构，把本房间响度写入跨房间记忆；录制器同步收尾落盘
   useEffect(() => {
     return () => {
       normRef.current?.destroy()
       normRef.current = null
+      recDestRef.current = null
+      void recorderRef.current?.stop()
       void audioGraphRef.current?.close().catch(() => {})
       audioGraphRef.current = null
     }
@@ -462,6 +481,94 @@ export function PlayerPane(p: PlayerPaneProps) {
     }
     setChatOpen((v) => !v)
   }, [chatActive])
+
+  // ---------- 直播录制 ----------
+  /** 展示「所属文件夹/文件名」，toast 里放不下完整路径 */
+  const tailPath = (f: string): string => {
+    const parts = f.split(/[\\/]/).filter(Boolean)
+    return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : f
+  }
+
+  const startRec = useCallback(async (): Promise<void> => {
+    const rec = recorderRef.current
+    const v = videoRef.current
+    if (!rec || !v || rec.active || phaseRef.current !== 'live') return
+    try {
+      const file = await rec.start(v, recDestRef.current?.stream.getAudioTracks()[0] ?? null, {
+        roomId: item.roomId,
+        webRid: webRid || undefined,
+        secUid: item.secUid,
+        nickname: info?.nickname || item.nickname
+      })
+      recRestartsRef.current = 0
+      setRecording(true)
+      toast(`开始录制：${tailPath(file)}`)
+    } catch (e) {
+      setRecording(false)
+      toast(`录制失败：${String((e as Error)?.message ?? e)}`)
+    }
+  }, [item.roomId, item.secUid, item.nickname, webRid, info?.nickname, toast])
+
+  const stopRec = useCallback(
+    (announce = true): void => {
+      const rec = recorderRef.current
+      if (!rec || !rec.active) return
+      setRecording(false)
+      void rec.stop().then((file) => {
+        if (!announce) return
+        if (file) toast(`录制已保存：${tailPath(file)}`)
+        else toast('录制内容太短，未保存')
+      })
+    },
+    [toast]
+  )
+
+  const toggleRec = useCallback((): void => {
+    const rec = recorderRef.current
+    if (!rec) return
+    if (rec.active) stopRec()
+    else void startRec()
+  }, [startRec, stopRec])
+
+  // 断流/切流导致轨道结束：自动分段保存，直播仍在则续录新段（限制次数防反复刷文件）
+  useEffect(() => {
+    const rec = recorderRef.current
+    if (!rec) return
+    rec.onInterrupted = (file) => {
+      setRecording(false)
+      if (Date.now() - rec.lastStartedAt >= 60_000) recRestartsRef.current = 0
+      if (++recRestartsRef.current <= 10) {
+        if (file) toast('直播流中断，本段已保存，正在续录…')
+        window.setTimeout(() => {
+          if (phaseRef.current === 'live' && !rec.active) void startRec()
+        }, 1_500)
+      } else if (file) {
+        toast(`直播流中断，本段已保存：${tailPath(file)}`)
+      }
+    }
+    return () => {
+      rec.onInterrupted = () => {}
+    }
+  }, [startRec, toast])
+
+  // 下播/出错：自动结束录制并保存
+  useEffect(() => {
+    if (st.phase !== 'live' && recorderRef.current?.active) stopRec()
+  }, [st.phase, stopRec])
+
+  // 主进程关窗前的收尾请求：停止录制落盘后放行关闭
+  useEffect(() => {
+    const off = api.onRecFinalize(() => {
+      const rec = recorderRef.current
+      const done = (): void => {
+        void api.recFinalizeDone()
+      }
+      if (rec && rec.active) void rec.stop().then(done, done)
+      else done()
+    })
+    return off
+  }, [])
+
   // 语音/电台房强制走音频界面：这类流的视频轨常为不可解码编码（如 H.265）或纯黑占位，
   // 仅靠 videoWidth===0 的运行时判定会漏（有轨但解不出画面 → 黑屏）
   const audioMode = st.audioOnly || info?.typeHint === 'voice' || info?.typeHint === 'audio'
@@ -643,6 +750,13 @@ export function PlayerPane(p: PlayerPaneProps) {
             title={chatActive ? '弹幕（已连接，点击显示/隐藏面板）' : '开启弹幕'}
           >
             <IconChat />
+          </button>
+          <button
+            className={cx('ctl', recording && 'ctl-rec')}
+            onClick={toggleRec}
+            title={recording ? '停止录制' : '录制直播'}
+          >
+            {recording ? <span className="rec-dot" /> : <IconRecord />}
           </button>
           <div className="timer-anchor">
             <button

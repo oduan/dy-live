@@ -32,6 +32,13 @@ export const IconChat = ({ size = 18, className }: { size?: number; className?: 
   </Svg>
 )
 
+export const IconRecord = ({ size = 18, className }: { size?: number; className?: string }) => (
+  <Svg size={size} className={className}>
+    <circle cx="12" cy="12" r="8.4" />
+    <circle cx="12" cy="12" r="3.6" fill="currentColor" stroke="none" />
+  </Svg>
+)
+
 export const IconPlay = ({ size = 18 }: { size?: number }) => (
   <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
     <path d="M8 5.2v13.6c0 .8.9 1.3 1.6.9l10.6-6.8c.6-.4.6-1.4 0-1.8L9.6 4.3C8.9 3.9 8 4.4 8 5.2z" />

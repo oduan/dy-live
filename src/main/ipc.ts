@@ -1,10 +1,11 @@
 import { BrowserWindow, ipcMain, shell } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { IpcResult, RoomEnterRef, Settings } from '@shared/types'
+import type { IpcResult, RecStartPayload, RoomEnterRef, Settings } from '@shared/types'
 import { clamp } from './util'
 import type { DouyinSessions } from './douyin/sessions'
 import type { LiveListService } from './douyin/liveList'
 import type { RoomWatcherService } from './douyin/roomWatcher'
+import type { RecordService } from './recorder'
 
 export interface IpcContext {
   sessions: DouyinSessions
@@ -15,6 +16,10 @@ export interface IpcContext {
   updater: UpdaterLike
   /** 弹幕：用户在房间内打开弹幕开关时对当前房间建连 */
   chatStart: () => boolean
+  /** 录制落盘服务 */
+  recorder: RecordService
+  /** 关窗收尾完成（渲染层已把录制文件落盘）：主进程据此放行关闭 */
+  onRecFinalized: () => void
 }
 
 interface UpdaterLike {
@@ -31,8 +36,8 @@ function ok<T>(data: T): IpcResult<T> {
   return { ok: true, data }
 }
 
-function wrap<T>(fn: () => Promise<T>): Promise<IpcResult<T>> {
-  return fn().then(
+function wrap<T>(fn: () => T | Promise<T>): Promise<IpcResult<T>> {
+  return Promise.resolve(fn()).then(
     (data) => ok(data),
     (e: unknown) => ({ ok: false, message: String((e as Error)?.message ?? e) })
   )
@@ -109,4 +114,29 @@ export function registerIpc(ctx: IpcContext): void {
   ipcMain.handle(IPC.UpdateGetState, () => ctx.updater.getState())
   ipcMain.handle(IPC.UpdateInstall, () => ok(ctx.updater.startDownload()))
   ipcMain.handle(IPC.ChatStart, () => ok(ctx.chatStart()))
+
+  ipcMain.handle(IPC.RecGetDir, () => ok(ctx.recorder.resolveDir()))
+  ipcMain.handle(IPC.RecPickDir, (e) => wrap(() => ctx.recorder.pickDir(BrowserWindow.fromWebContents(e.sender))))
+  ipcMain.handle(IPC.RecStart, (_e, info: Partial<RecStartPayload> | undefined) =>
+    wrap(() =>
+      ctx.recorder.start({
+        roomId: String(info?.roomId ?? ''),
+        webRid: typeof info?.webRid === 'string' && info.webRid ? info.webRid : undefined,
+        secUid: typeof info?.secUid === 'string' && info.secUid ? info.secUid : undefined,
+        nickname: String(info?.nickname ?? ''),
+        ext: String(info?.ext ?? 'mp4')
+      })
+    )
+  )
+  ipcMain.handle(IPC.RecWrite, (_e, p: { id?: number; chunk?: ArrayBuffer } | undefined) => {
+    if (typeof p?.id !== 'number' || !(p.chunk instanceof ArrayBuffer)) return ok(false)
+    return ok(ctx.recorder.write(p.id, p.chunk))
+  })
+  ipcMain.handle(IPC.RecStop, (_e, id: unknown) =>
+    wrap(() => ctx.recorder.stop(typeof id === 'number' ? id : undefined))
+  )
+  ipcMain.handle(IPC.RecFinalizeDone, () => {
+    ctx.onRecFinalized()
+    return ok(true)
+  })
 }

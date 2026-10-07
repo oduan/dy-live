@@ -22,6 +22,9 @@ export interface SidebarProps {
   onRefresh: () => void
   onLoudnessNorm: (v: boolean) => void
   onAppGainDb: (db: number) => void
+  /** 直播录制保存目录（生效路径） */
+  recordDir: string
+  onPickRecordDir: () => void
   onLogout: () => void
 }
 
@@ -32,6 +35,12 @@ function useNow(intervalMs: number): number {
     return () => clearInterval(t)
   }, [intervalMs])
   return now
+}
+
+/** 菜单宽度有限：录制路径只展示末两级目录，完整路径见 title 提示 */
+function tailPath(p: string): string {
+  const parts = p.split(/[\\/]/).filter(Boolean)
+  return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : p
 }
 
 export function Sidebar(p: SidebarProps) {
@@ -116,6 +125,14 @@ export function Sidebar(p: SidebarProps) {
                       {p.settings.appGainDb > 0 ? '+' : ''}
                       {p.settings.appGainDb} dB
                     </span>
+                  </div>
+                  <div className="menu-divider" />
+                  <div className="menu-title">直播录制</div>
+                  <div className="rec-row" title={p.recordDir}>
+                    <span className="rec-dir">{tailPath(p.recordDir)}</span>
+                    <button className="rec-dir-btn" onClick={p.onPickRecordDir} title="选择录制视频的保存位置">
+                      更改位置
+                    </button>
                   </div>
                   <div className="menu-divider" />
                   {confirmLogout ? (

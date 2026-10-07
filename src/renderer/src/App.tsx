@@ -62,6 +62,8 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
   const [blocked, setBlocked] = useState<{ until: number; reason: string } | null>(null)
   const [selected, setSelected] = useState<LiveItem | null>(null)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
+  /** 直播录制保存目录（主进程解析后的生效路径） */
+  const [recordDir, setRecordDir] = useState('')
   // 首次列表加载未完成前不进入"空态"（显示骨架而非"暂无正在直播"）
   const [booted, setBooted] = useState(false)
   const manualAt = useRef(0)
@@ -90,6 +92,9 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
 
   useEffect(() => {
     void api.settingsGet().then(setSettings)
+    void api.recGetDir().then((r) => {
+      if (r.ok) setRecordDir(r.data)
+    })
     // 先用本地缓存即时渲染，再拉最新
     void api.listGetCached().then((r) => {
       if (r.ok && r.data?.items?.length) {
@@ -139,6 +144,12 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
     void api.logout()
   }, [])
 
+  /** 设置菜单：选择录制保存目录（主进程弹目录对话框并持久化） */
+  const pickRecordDir = useCallback(async (): Promise<void> => {
+    const r = await api.recPickDir()
+    if (r.ok) setRecordDir(r.data)
+  }, [])
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -159,6 +170,8 @@ function MainLayout(props: { profile: ProfileInfo | null }) {
         onRefresh={() => (phase === 'error' ? void reload() : manualRefresh())}
         onLoudnessNorm={(v) => persistSettings({ loudnessNorm: v })}
         onAppGainDb={(db) => persistSettings({ appGainDb: db })}
+        recordDir={recordDir}
+        onPickRecordDir={() => void pickRecordDir()}
         onLogout={onLogout}
       />
       <main className="main-pane">

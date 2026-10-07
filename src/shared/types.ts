@@ -93,8 +93,10 @@ export interface Settings {
   muted: boolean
   /** 响度自动平衡：各直播间响度归一化到统一目标（BS.1770 纯增益），默认开 */
   loudnessNorm: boolean
-  /** 应用级增益（dB），叠加在响度归一化之上，范围 -24 ~ +12，默认 0 */
+  /** 应用级增益（dB），叠加在归一化之上，范围 -24 ~ +12，默认 0 */
   appGainDb: number
+  /** 直播录制保存根目录；为空时使用默认位置（系统视频目录/dy-live） */
+  recordDir?: string
 }
 
 export interface AuthState {
@@ -137,6 +139,22 @@ export interface ChatEvent {
 
 /** IPC 返回的统一包装 */
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; message: string }
+
+/** 开始录制请求（渲染层 → 主进程） */
+export interface RecStartPayload {
+  roomId: string
+  webRid?: string
+  secUid?: string
+  nickname: string
+  /** 容器扩展名（mp4/webm），由渲染层按 MediaRecorder 能力决定 */
+  ext: string
+}
+
+/** 开始录制结果：会话 id 用于后续 write/stop 匹配，file 为完整保存路径 */
+export interface RecStartResult {
+  id: number
+  file: string
+}
 
 export interface RoomEnterRef {
   roomId?: string

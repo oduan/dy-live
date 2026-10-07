@@ -31,7 +31,9 @@ export function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true,
-      spellcheck: false
+      spellcheck: false,
+      // 直播录制（captureStream）依赖隐藏状态下仍持续出帧，不做后台节流
+      backgroundThrottling: false
     }
   })
 
