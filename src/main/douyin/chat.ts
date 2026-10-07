@@ -14,7 +14,7 @@ import WebSocket from 'ws'
 import { gunzipSync } from 'node:zlib'
 import { IPC } from '@shared/ipc'
 import type { ChatItem, ChatEvent } from '@shared/types'
-import { decodeFields, encodeBytesField, fstr, type ProtoField } from './proto-lite'
+import { decodeFields, encodeBytesField, fint, fstr, type ProtoField } from './proto-lite'
 import { GiftAggregator, dumpProtoTree, parseGiftMessage, parseLightGiftMessage, type ParsedGift } from './gift'
 import { log } from '../util'
 import type { DouyinSessions } from './sessions'
@@ -31,6 +31,10 @@ const DEDUP_WINDOW_MS = 3_000
 const POLL_INTERVAL_MS = 1_200
 /** 连续轮询失败次数达到该值后重新握手（fetch_rule=1） */
 const POLL_ERRORS_BEFORE_REHANDSHAKE = 3
+/** 长轮询静默判定：请求一直成功但超过该时长无任何消息下行，视为 IM 会话在服务端已失效 */
+const POLL_SILENT_MS = 60_000
+/** 重同步（重新握手）后的窗口：本会话见过的消息一律按服务端回放历史丢弃，避免恢复时刷旧弹幕 */
+const RESYNC_SUPPRESS_MS = 10_000
 
 export interface ChatServiceDeps {
   sessions: DouyinSessions
@@ -75,6 +79,16 @@ export class ChatService {
   private pollTimer: NodeJS.Timeout | undefined
   private polling = false
   private pollErrors = 0
+  /** 会话代际：start() 递增；在途的轮询/连接完成后发现代际不符即自行退出（防跨 stop/start 污染与双循环） */
+  private pollEpoch = 0
+  /** 最近一次收到任何消息下行的时间（轮询静默看门狗用；空响应不刷新） */
+  private lastMsgAt = 0
+  /** 最近一次重同步（重新握手）时刻；其后短暂窗口内已见过的 msg_id 视为服务端回放 */
+  private resyncAt = 0
+  /** 静默看门狗的用户提示本轮静默期只发一次，恢复收到消息后复位 */
+  private silentWarned = false
+  /** 服务端最近下发的 fetch_type（传输升级指令观察用，仅记录不切换） */
+  private lastFetchType = 0
 
   constructor(private deps: ChatServiceDeps) {}
 
@@ -91,6 +105,11 @@ export class ChatService {
     this.frameCount = 0
     this.polling = false
     this.pollErrors = 0
+    this.pollEpoch++
+    this.lastMsgAt = Date.now()
+    this.resyncAt = 0
+    this.silentWarned = false
+    this.lastFetchType = 0
     this.cursor = ''
     this.internalExt = ''
     this.buffer = []
@@ -277,14 +296,18 @@ export class ChatService {
    * 研究实测该通道无签名要求、稳定投递全部消息类型（WSS 直连在本环境被服务端静默不路由）。
    */
   private async startPolling(): Promise<void> {
+    const epoch = this.pollEpoch
     this.polling = true
     try {
       await this.fetchImSession()
     } catch (e) {
+      if (this.stopped || epoch !== this.pollEpoch) return
       log('chat', '长轮询握手失败，回退 WebSocket:', (e as Error)?.message)
       this.polling = false
       return this.connect()
     }
+    // 握手期间可能已被 stop()/start() 更代：旧会话的收尾到此为止
+    if (this.stopped || epoch !== this.pollEpoch) return
     this.attempts = 0
     this.pollErrors = 0
     this.sys('弹幕连接已建立')
@@ -292,9 +315,26 @@ export class ChatService {
   }
 
   private async pollOnce(): Promise<void> {
-    if (this.stopped || !this.polling) return
+    const epoch = this.pollEpoch
+    if (this.stopped || !this.polling || epoch !== this.pollEpoch) return
     const t0 = Date.now()
     try {
+      // 静默看门狗：HTTP 一直成功但长时间没有任何消息下行，多为 IM 会话在服务端已失效
+      // （cursor 过期、guest 页重建后绑定失效、网络切换/睡眠恢复）——此时 pollErrors 恒为 0，
+      // 只能靠主动重握手自愈，否则列表永久静默冻结
+      if (Date.now() - this.lastMsgAt > POLL_SILENT_MS) {
+        if (!this.silentWarned) {
+          this.silentWarned = true
+          this.sys('弹幕长时间无消息，正在重新同步…')
+        }
+        log('chat', '看门狗：轮询静默超时，重新握手同步')
+        this.cursor = ''
+        this.internalExt = ''
+        await this.fetchImSession()
+        // 重握手本身证明通道存活：重置静默计时（真安静房间最多每 60s 重同步一次）
+        this.lastMsgAt = Date.now()
+        this.resyncAt = Date.now()
+      }
       const ses = this.deps.sessions
       const wc = await ses.ensureGuest()
       const res = await ses.pageFetchBinary(wc, this.imFetchUrl(2))
@@ -304,21 +344,27 @@ export class ChatService {
       this.handleImResponse(res.body)
       this.pollErrors = 0
     } catch (e) {
-      if (this.stopped || !this.polling) return
+      if (this.stopped || !this.polling || epoch !== this.pollEpoch) return
       this.pollErrors++
       log('chat', `轮询失败（第 ${this.pollErrors} 次）:`, (e as Error)?.message)
+      if (this.pollErrors === POLL_ERRORS_BEFORE_REHANDSHAKE) {
+        this.sys('弹幕连接不稳定，正在尝试恢复…')
+      }
       if (this.pollErrors >= POLL_ERRORS_BEFORE_REHANDSHAKE) {
         try {
           this.cursor = ''
           this.internalExt = ''
           await this.fetchImSession()
           this.pollErrors = 0
+          this.lastMsgAt = Date.now()
+          this.resyncAt = Date.now()
           this.sys('弹幕连接已恢复')
         } catch (e2) {
           log('chat', '重新握手失败:', (e2 as Error)?.message)
         }
       }
     }
+    if (this.stopped || !this.polling || epoch !== this.pollEpoch) return
     const wait = Math.max(300, POLL_INTERVAL_MS - (Date.now() - t0))
     this.pollTimer = setTimeout(() => void this.pollOnce(), wait)
   }
@@ -330,12 +376,25 @@ export class ChatService {
     if (cursor) this.cursor = cursor
     const ext = fstr(resp.get(5)?.[0])
     if (ext) this.internalExt = ext
+    // fetch_type：服务端指挥客户端升级传输的信号（1=Socket，附 push_server）。
+    // 出现即说明服务端期望换通道，可能与「轮询 200 但无消息」相关——先留日志观察，不据此切换
+    const fetchType = fint(resp.get(6)?.[0])
+    if (fetchType !== 0 && fetchType !== this.lastFetchType) {
+      this.lastFetchType = fetchType
+      log('chat', `服务端下发 fetch_type=${fetchType}（观察：若此后消息中断，需处理传输升级）`)
+    }
     this.dispatchMessages(resp)
   }
 
   /** 遍历 Response.messages 并分发（长轮询与 WSS 帧共用） */
   private dispatchMessages(resp: Map<number, ProtoField[]>): void {
-    for (const m of resp.get(1) ?? []) {
+    const messages = resp.get(1) ?? []
+    // 只要有任何消息下行（含本应用未处理的类型）即证明会话存活
+    if (messages.length) {
+      this.lastMsgAt = Date.now()
+      this.silentWarned = false
+    }
+    for (const m of messages) {
       const msg = decodeFields(m.bytes)
       const method = fstr(msg.get(1)?.[0])
       const mp = msg.get(2)?.[0]?.bytes
@@ -367,6 +426,7 @@ export class ChatService {
   }
 
   private async connect(): Promise<void> {
+    const epoch = this.pollEpoch
     try {
       // 主路径：纯算法构造 URL（签名借常驻 guest 页计算，全程不导航房间页，切房/重连秒级）
       let url = ''
@@ -400,6 +460,8 @@ export class ChatService {
       // WS 升级请求必须带浏览器同款头：Cookie(ttwid 等) 缺失会被风控拒（回 200 而非 101）
       const cookie = await this.deps.sessions.getGuestCookieHeader()
       const ua = this.deps.sessions.getUserAgent()
+      // 参数收集期间会话可能已被 stop()/start() 更代：丢弃本次连接，防旧 WS 覆盖新会话
+      if (this.stopped || epoch !== this.pollEpoch) return
       const ws = new WebSocket(url, {
         headers: {
           Cookie: cookie,
@@ -409,6 +471,12 @@ export class ChatService {
       })
       this.ws = ws
       ws.on('open', () => {
+        if (this.stopped || epoch !== this.pollEpoch) {
+          try {
+            ws.close()
+          } catch {}
+          return
+        }
         log('chat', '弹幕服务已连接', this.roomId)
         this.attempts = 0
         this.everOpened = true
@@ -442,10 +510,13 @@ export class ChatService {
           log('chat', `握手被拒 HTTP ${res.statusCode}:`, body.slice(0, 260) || '(无响应体)')
         })
       })
-      ws.on('close', () => this.scheduleReconnect('closed'))
+      ws.on('close', () => {
+        // 旧会话的连接关闭不得触发新会话的重连调度
+        if (!this.stopped && epoch === this.pollEpoch) this.scheduleReconnect('closed')
+      })
     } catch (e) {
       log('chat', '连接失败:', (e as Error)?.message)
-      this.scheduleReconnect('error')
+      if (!this.stopped && epoch === this.pollEpoch) this.scheduleReconnect('error')
     }
   }
 
@@ -551,7 +622,10 @@ export class ChatService {
   private isDup(key: string): boolean {
     const now = Date.now()
     const last = this.seenKeys.get(key)
-    if (last !== undefined && now - last < DEDUP_WINDOW_MS) return true
+    // 重同步窗口内：本会话见过的 key 不论多久之前都按服务端回放的历史丢弃
+    if (last !== undefined && (now - last < DEDUP_WINDOW_MS || now - this.resyncAt < RESYNC_SUPPRESS_MS)) {
+      return true
+    }
     this.seenKeys.set(key, now)
     if (this.seenKeys.size > 800) {
       for (const [k, t] of this.seenKeys) {

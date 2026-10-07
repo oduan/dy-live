@@ -60,13 +60,17 @@ async function __pageFetch(url: string, sign: boolean): Promise<PageFetchResult>
 
 /**
  * 在页面上下文执行的二进制 fetch：返回 base64（protobuf 接口用，避免 text 编码损伤字节）。
+ * 页内自带 AbortController 超时：网络假死时快速失败（主进程 EXEC_TIMEOUT 25s 只作外层兜底）。
  */
-async function __pageFetchBinary(url: string): Promise<{ status: number; b64: string; err?: string }> {
+async function __pageFetchBinary(url: string, timeoutMs = 10_000): Promise<{ status: number; b64: string; err?: string }> {
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), timeoutMs)
   try {
     const resp = await fetch(url, {
       method: 'GET',
       credentials: 'include',
-      headers: { accept: 'application/json, text/plain, */*' }
+      headers: { accept: 'application/json, text/plain, */*' },
+      signal: ctl.signal
     })
     const buf = new Uint8Array(await resp.arrayBuffer())
     let bin = ''
@@ -77,6 +81,8 @@ async function __pageFetchBinary(url: string): Promise<{ status: number; b64: st
     return { status: resp.status, b64: btoa(bin) }
   } catch (err: any) {
     return { status: 0, b64: '', err: String(err?.message ?? err) }
+  } finally {
+    clearTimeout(timer)
   }
 }
 
