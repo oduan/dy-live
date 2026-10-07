@@ -11,6 +11,16 @@ files:
   - out/**
   - package.json
   - "!**/*.map"
+# 随应用打包 ffmpeg（源流直录收尾时无损转封装 FLV→MP4，不依赖用户环境）
+# 二进制不入 git（见 .gitignore），构建机上自行放入 resources/ffmpeg/
+extraResources:
+  - from: resources/ffmpeg
+    to: ffmpeg
+    filter:
+      - ffmpeg.exe
+      - ffmpeg
+# 压缩等级提到 lzma 最大：抵消 ffmpeg 二进制（~147MB）带来的安装包体积增长
+compression: maximum
 win:
   target:
     - target: nsis

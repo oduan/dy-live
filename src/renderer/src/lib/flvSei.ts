@@ -197,55 +197,121 @@ class FlvSeiParser {
   }
 }
 
-let activeTap: { original: typeof fetch } | null = null
-
-/** 创建增量解析器（独立导出，便于无 DOM 环境测试） */
-export function createFlvSeiParser(onLayout: (l: SeiLayout) => void): FlvSeiParserLike {
-  return new FlvSeiParser(onLayout)
+/** FLV 字节旁路消费者：连接为一次 HTTP 响应（重连 = 新连接新 id） */
+export interface FlvTapConsumer {
+  onConnStart?(id: number): void
+  onChunk?(id: number, chunk: Uint8Array): void
+  onConnEnd?(id: number): void
 }
 
-function disposeTap(): void {
-  if (activeTap) {
-    window.fetch = activeTap.original
-    activeTap = null
-  }
+interface TapEntry {
+  consumers: Set<FlvTapConsumer>
+  /** 尚未送达 end 的连接 id：消费者提前退订时需向其补发（见 subscribeFlvBytes） */
+  open: Set<number>
 }
 
-/**
- * 安装 FLV 拉流的 fetch 旁路（同一时刻仅一个；新 tap 会先还原旧的）。
- * 主路字节经 tee 原样交给调用方（mpegts.js），旁路增量解析 SEI 布局。
- */
-export function tapFlvSei(url: string, onLayout: (l: SeiLayout) => void): FlvSeiTap {
-  disposeTap()
+let installed: { original: typeof fetch } | null = null
+let connSeq = 0
+/** key: 去查询串的 URL；多个窗口/房间可同时各 tap 各的流 */
+const taps = new Map<string, TapEntry>()
+
+function installPatch(): void {
+  if (installed) return
   const original = window.fetch
-  const parser = createFlvSeiParser(onLayout)
-  const plain = url.split('?')[0]
   const wrapped: typeof fetch = async (input, init) => {
     const res = await original.call(window, input, init)
     try {
       const req = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      if (!res.body || req.split('?')[0] !== plain) return res
+      const entry = taps.get(req.split('?')[0])
+      if (!entry || !res.body || entry.consumers.size === 0) return res
       const [main, side] = res.body.tee()
-      void pump(side, parser)
+      const id = ++connSeq
+      entry.open.add(id)
+      for (const c of [...entry.consumers]) {
+        try {
+          c.onConnStart?.(id)
+        } catch {}
+      }
+      void pump(side, id, entry)
       return new Response(main, { status: res.status, statusText: res.statusText, headers: res.headers })
     } catch {
       return res
     }
   }
   window.fetch = wrapped
-  activeTap = { original }
-  return { dispose: disposeTap }
+  installed = { original }
 }
 
-async function pump(stream: ReadableStream<Uint8Array>, parser: FlvSeiParserLike): Promise<void> {
+function uninstallIfIdle(): void {
+  if (installed && taps.size === 0) {
+    window.fetch = installed.original
+    installed = null
+  }
+}
+
+async function pump(stream: ReadableStream<Uint8Array>, id: number, entry: TapEntry): Promise<void> {
   const reader = stream.getReader()
   try {
     for (;;) {
       const { done, value } = await reader.read()
       if (done || !value) break
-      parser.feed(value)
+      for (const c of [...entry.consumers]) {
+        try {
+          c.onChunk?.(id, value)
+        } catch {}
+      }
     }
   } catch {
     // 播放器取消/中断属正常，旁路随流结束
   }
+  entry.open.delete(id)
+  for (const c of [...entry.consumers]) {
+    try {
+      c.onConnEnd?.(id)
+    } catch {}
+  }
+}
+
+/**
+ * 订阅指定 URL 拉流连接的原始字节（同 URL 可多次重连，以连接 id 区分）。
+ * 退订时若仍有存活的连接（播放器销毁/切源会先同步退订，连接的异步结束
+ * 事件随后才到），会先向退订者补发这些连接的 onConnEnd——录制侧依赖该
+ * 事件触发分段收尾，不能丢。
+ * 返回退订函数；最后一个订阅退订后自动还原 fetch。
+ */
+export function subscribeFlvBytes(url: string, consumer: FlvTapConsumer): () => void {
+  const plain = url.split('?')[0]
+  let entry = taps.get(plain)
+  if (!entry) {
+    entry = { consumers: new Set(), open: new Set() }
+    taps.set(plain, entry)
+  }
+  entry.consumers.add(consumer)
+  installPatch()
+  return () => {
+    const e = taps.get(plain)
+    if (!e || !e.consumers.delete(consumer)) return
+    for (const id of [...e.open]) {
+      try {
+        consumer.onConnEnd?.(id)
+      } catch {}
+    }
+    if (e.consumers.size === 0) taps.delete(plain)
+    uninstallIfIdle()
+  }
+}
+
+/** 创建增量解析器（独立导出，便于无 DOM 环境测试） */
+export function createFlvSeiParser(onLayout: (l: SeiLayout) => void): FlvSeiParserLike {
+  return new FlvSeiParser(onLayout)
+}
+
+/**
+ * 安装 FLV 拉流的 fetch 旁路（SEI 解析专用；录制走 subscribeFlvBytes）。
+ * 主路字节经 tee 原样交给调用方（mpegts.js），旁路增量解析 SEI 布局。
+ */
+export function tapFlvSei(url: string, onLayout: (l: SeiLayout) => void): FlvSeiTap {
+  const parser = createFlvSeiParser(onLayout)
+  const off = subscribeFlvBytes(url, { onChunk: (_id, chunk) => parser.feed(chunk) })
+  return { dispose: off }
 }

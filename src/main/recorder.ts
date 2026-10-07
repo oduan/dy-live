@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import { app, dialog, type BrowserWindow } from 'electron'
 import type { RecStartPayload, RecStartResult } from '@shared/types'
 import { store } from './store'
@@ -38,6 +39,7 @@ export class RecordService {
   private fd: number | null = null
   private id = 0
   private file = ''
+  private ext = 'mp4'
 
   get active(): boolean {
     return this.fd !== null
@@ -62,6 +64,7 @@ export class RecordService {
   start(info: RecStartPayload): RecStartResult {
     if (this.fd !== null) throw new Error('已有录制任务进行中')
     const ext = /^\w{1,5}$/.test(info.ext) ? info.ext : 'mp4'
+    this.ext = ext
     const rid = info.webRid || info.roomId || info.secUid || 'room'
     const base = this.resolveDir()
     const ridPart = sanitize(rid, 'room')
@@ -122,6 +125,11 @@ export class RecordService {
       log('recorder', '检查录制文件失败:', (e as Error)?.message)
     }
     log('recorder', '录制结束:', file)
+    // 源流直录（FLV）：无损转封装为 MP4（-c copy 不重编码，磁盘拷贝级耗时）
+    if (this.ext === 'flv') {
+      const mp4 = this.scheduleRemux(file)
+      if (mp4) return mp4
+    }
     return file
   }
 
@@ -138,4 +146,58 @@ export class RecordService {
     }
     return this.resolveDir()
   }
+
+  /**
+   * 无损转封装 FLV → MP4（-c copy 纯搬运，不重编码、无质量损失）。
+   * Windows 下不用 detached：detached 会给控制台子进程分配可见窗口（收尾闪黑框），
+   * windowsHide（CREATE_NO_WINDOW）才能彻底隐藏；且 Windows 子进程本就不会随
+   * 父进程退出而被杀，应用退出后转封装照常完成（该路径下退出监听已失效，
+   * 源 FLV 会保留在 MP4 旁）。成功后删源 FLV，失败则保留双文件（FLV 可直接播放）。
+   * 返回预计的 MP4 路径；找不到 ffmpeg 返回 null（保留 FLV）。
+   */
+  private scheduleRemux(flv: string): string | null {
+    const ff = locateFfmpeg()
+    if (!ff) {
+      log('recorder', '未找到随包 ffmpeg，保留原始 FLV:', flv)
+      return null
+    }
+    const mp4 = flv.replace(/\.flv$/i, '.mp4')
+    const args = ['-y', '-i', flv, '-c', 'copy', '-movflags', '+faststart', mp4]
+    try {
+      const child = spawn(ff, args, {
+        stdio: 'ignore',
+        windowsHide: process.platform === 'win32',
+        detached: process.platform !== 'win32'
+      })
+      child.on('exit', (code) => {
+        if (code === 0) fs.unlink(flv, () => {})
+      })
+      child.unref()
+      log('recorder', '已调度无损转封装 →', mp4)
+      return mp4
+    } catch (e) {
+      log('recorder', '调度转封装失败:', (e as Error)?.message)
+      return null
+    }
+  }
+}
+
+/** 定位 ffmpeg：随包资源（安装目录/开发项目 resources/ffmpeg）优先，PATH 兜底 */
+function locateFfmpeg(): string | null {
+  const exe = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+  const candidates: string[] = []
+  if (process.resourcesPath) candidates.push(path.join(process.resourcesPath, 'ffmpeg', exe))
+  try {
+    candidates.push(path.join(app.getAppPath(), 'resources', 'ffmpeg', exe))
+  } catch {}
+  const sep = process.platform === 'win32' ? ';' : ':'
+  for (const d of (process.env.PATH ?? '').split(sep)) {
+    if (d.trim()) candidates.push(path.join(d.trim(), exe))
+  }
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p
+    } catch {}
+  }
+  return null
 }

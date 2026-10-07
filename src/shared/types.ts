@@ -146,7 +146,7 @@ export interface RecStartPayload {
   webRid?: string
   secUid?: string
   nickname: string
-  /** 容器扩展名（mp4/webm），由渲染层按 MediaRecorder 能力决定 */
+  /** 容器扩展名（mp4/webm/flv）：mp4/webm 由渲染层按 MediaRecorder 能力决定，flv 为源流直录 */
   ext: string
 }
 

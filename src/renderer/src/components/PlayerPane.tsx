@@ -4,7 +4,8 @@ import { api } from '../lib/dy'
 import { ContentCropper } from '../lib/contentCrop'
 import { LiveStreamPlayer } from '../lib/player'
 import { LoudnessNormalizer } from '../lib/loudness'
-import { LiveRecorder } from '../lib/recorder'
+import { RecController } from '../lib/recorder'
+import { FlvRecTap } from '../lib/streamRecorder'
 import { AudioRing } from './AudioRing'
 import {
   IconAlert,
@@ -87,11 +88,16 @@ export function PlayerPane(p: PlayerPaneProps) {
   const normRef = useRef<LoudnessNormalizer | null>(null)
   /** 录制音频旁路：源节点直连，取原始音频（不随音量/静音/归一化变化） */
   const recDestRef = useRef<MediaStreamAudioDestinationNode | null>(null)
+  /** FLV 源直录旁路（跟随播放源 retarget；HLS 源置空走 MediaRecorder 兜底） */
+  const recTapRef = useRef<FlvRecTap | null>(null)
+  if (!recTapRef.current) recTapRef.current = new FlvRecTap()
   /** 直播录制器（随房间挂载，切房时自动收尾） */
-  const recorderRef = useRef<LiveRecorder | null>(null)
-  if (!recorderRef.current) recorderRef.current = new LiveRecorder()
+  const recorderRef = useRef<RecController | null>(null)
+  if (!recorderRef.current) recorderRef.current = new RecController(() => recTapRef.current)
   /** 断流自动分段续录的次数（长段成功后重置） */
   const recRestartsRef = useRef(0)
+  /** 手动刷新直播流时的续录意图：新流恢复播放后自动开新段 */
+  const resumeRecRef = useRef(false)
   const candsRef = useRef<StreamChoice[]>([])
   const candIdx = useRef(0)
   const seqRef = useRef(0)
@@ -194,6 +200,8 @@ export function PlayerPane(p: PlayerPaneProps) {
   const handleFatal = useCallback(
     (reason: string): void => {
       if (phaseRef.current !== 'live') return
+      // 留痕便于排查「信号不稳定」提示的触发源（网络/媒体/看门狗卡顿/自动播放）
+      console.warn('[player] fatal:', reason)
       fatalCount.current++
       const next = candIdx.current + 1
       if (fatalCount.current <= 4 && next < candsRef.current.length) {
@@ -251,8 +259,14 @@ export function PlayerPane(p: PlayerPaneProps) {
       player.attach(v)
       v.volume = p.volume
       v.muted = p.muted
-      // FLV 源旁路解析 SEI 布局（PK/连麦精确取景）；HLS 等无旁路时走像素兜底
-      if (c.kind === 'flv') cropRef.current?.tapStream(c.url)
+      // FLV 源旁路解析 SEI 布局（PK/连麦精确取景）并接管原始字节（源流直录）；
+      // HLS 等无旁路时取景走像素兜底、录制走 MediaRecorder 兜底
+      if (c.kind === 'flv') {
+        cropRef.current?.tapStream(c.url)
+        recTapRef.current?.retarget(c.url)
+      } else {
+        recTapRef.current?.retarget(null)
+      }
       player.load(c.url, c.kind)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -312,6 +326,7 @@ export function PlayerPane(p: PlayerPaneProps) {
     return () => {
       cropRef.current?.destroy()
       cropRef.current = null
+      recTapRef.current?.retarget(null)
       playerRef.current?.destroy()
       playerRef.current = null
     }
@@ -333,15 +348,27 @@ export function PlayerPane(p: PlayerPaneProps) {
       }
     }
     const resume = (): void => void audioGraphRef.current?.resume().catch(() => {})
+    // 切流恢复后清掉「信号不稳定」提示：此前只在进房/报错时重置，
+    // 备选流切换成功后提示会一直挂着（播放却正常）
+    const onPlaying = (): void => {
+      setSt((s) => (s.recovering ? { ...s, recovering: false } : s))
+      // 手动刷新直播流的续录：新流真正出画面后开新段（此时连接与头部字节已就绪）
+      if (resumeRecRef.current && phaseRef.current === 'live') {
+        resumeRecRef.current = false
+        void startRecRef.current()
+      }
+    }
     v.addEventListener('playing', check)
     v.addEventListener('loadedmetadata', check)
     v.addEventListener('error', onErr)
     v.addEventListener('playing', resume)
+    v.addEventListener('playing', onPlaying)
     return () => {
       v.removeEventListener('playing', check)
       v.removeEventListener('loadedmetadata', check)
       v.removeEventListener('error', onErr)
       v.removeEventListener('playing', resume)
+      v.removeEventListener('playing', onPlaying)
     }
   }, [st.phase])
 
@@ -352,6 +379,8 @@ export function PlayerPane(p: PlayerPaneProps) {
       normRef.current?.destroy()
       normRef.current = null
       recDestRef.current = null
+      recTapRef.current?.retarget(null)
+      resumeRecRef.current = false
       void recorderRef.current?.stop()
       void audioGraphRef.current?.close().catch(() => {})
       audioGraphRef.current = null
@@ -508,6 +537,8 @@ export function PlayerPane(p: PlayerPaneProps) {
       toast(`录制失败：${String((e as Error)?.message ?? e)}`)
     }
   }, [item.roomId, item.secUid, item.nickname, webRid, info?.nickname, toast])
+  const startRecRef = useRef(startRec)
+  startRecRef.current = startRec
 
   const stopRec = useCallback(
     (announce = true): void => {
@@ -530,6 +561,15 @@ export function PlayerPane(p: PlayerPaneProps) {
     else void startRec()
   }, [startRec, stopRec])
 
+  /** 手动刷新直播流：当前段先收尾保存，新流恢复播放后自动续录新段 */
+  const refreshStream = useCallback((): void => {
+    if (recorderRef.current?.active) {
+      resumeRecRef.current = true
+      stopRec(false)
+    }
+    setReloadKey((k) => k + 1)
+  }, [stopRec])
+
   // 断流/切流导致轨道结束：自动分段保存，直播仍在则续录新段（限制次数防反复刷文件）
   useEffect(() => {
     const rec = recorderRef.current
@@ -551,8 +591,9 @@ export function PlayerPane(p: PlayerPaneProps) {
     }
   }, [startRec, toast])
 
-  // 下播/出错：自动结束录制并保存
+  // 下播/出错：自动结束录制并保存；续录意图随之作废（下播后不应自动开新段）
   useEffect(() => {
+    if (st.phase === 'ended' || st.phase === 'error') resumeRecRef.current = false
     if (st.phase !== 'live' && recorderRef.current?.active) stopRec()
   }, [st.phase, stopRec])
 
@@ -722,7 +763,7 @@ export function PlayerPane(p: PlayerPaneProps) {
           <button className="ctl" onClick={togglePlay} title={st.paused ? '播放（空格）' : '暂停（空格）'}>
             {st.paused ? <IconPlay /> : <IconPause />}
           </button>
-          <button className="ctl" onClick={() => setReloadKey((k) => k + 1)} title="刷新直播流">
+          <button className="ctl" onClick={refreshStream} title="刷新直播流">
             <IconRefresh />
           </button>
           <div className="volume-box" title="音量">

@@ -1,10 +1,13 @@
 /**
- * 直播录制：把 <video> 正在播放的内容（captureStream 画面 + WebAudio 旁路音频）
- * 用 MediaRecorder 封装为 MP4（内核不支持时退 WebM），分片经 IPC 交主进程落盘。
+ * 直播录制：
+ * - FLV 源 → 源流直录（StreamRecorder）：旁路原始字节直接落盘，无损、流畅、无花屏
+ * - 其余（HLS 等）→ 画面捕获（LiveRecorder）：captureStream + MediaRecorder 兜底
  * 音频从 WebAudio 源节点直接旁路，不随音量/静音变化，尽量还原直播原始响度。
  */
 import { api } from './dy'
 import type { RecStartPayload } from '@shared/types'
+import { StreamRecorder } from './streamRecorder'
+import type { FlvRecTap } from './streamRecorder'
 
 export interface RecMeta {
   roomId: string
@@ -158,5 +161,41 @@ export class LiveRecorder {
     const file = (r && r.ok ? r.data : null) || this.file || null
     this.file = ''
     return file
+  }
+}
+
+/**
+ * 录制门面：FLV 源且旁路就绪时走源流直录，否则退回画面捕获。
+ * 对外接口与 LiveRecorder 一致，PlayerPane 无感知。
+ */
+export class RecController {
+  onInterrupted: (file: string | null) => void = () => {}
+  private impl: LiveRecorder | StreamRecorder | null = null
+
+  constructor(private getFlvTap: () => FlvRecTap | null) {}
+
+  get active(): boolean {
+    return this.impl?.active ?? false
+  }
+
+  get lastStartedAt(): number {
+    return this.impl?.lastStartedAt ?? 0
+  }
+
+  start(video: HTMLVideoElement, audioTrack: MediaStreamTrack | null, meta: RecMeta): Promise<string> {
+    const tap = this.getFlvTap()
+    const rec = tap && tap.canRecord() ? new StreamRecorder(tap) : new LiveRecorder()
+    rec.onInterrupted = (f) => {
+      this.onInterrupted(f)
+    }
+    this.impl = rec
+    return rec.start(video, audioTrack, meta)
+  }
+
+  async stop(): Promise<string | null> {
+    const impl = this.impl
+    if (!impl) return null
+    this.impl = null
+    return impl.stop()
   }
 }
