@@ -1,6 +1,6 @@
 {
   "name": "dy-live",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "抖音关注直播桌面观看工具（Electron）",
   "main": "./out/main/index.js",
   "author": "oduan",
